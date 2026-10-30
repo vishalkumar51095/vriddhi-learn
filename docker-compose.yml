@@ -1,0 +1,146 @@
+version: "3.9"
+
+# Vriddhi Learn — full local development stack, with service discovery.
+# Bring everything up:   docker compose up --build
+# Everything goes through the gateway on :8080; the Eureka dashboard is at
+# :8761 once discovery-server is up, and shows every service as it registers.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vriddhi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vriddhi
+      POSTGRES_PASSWORD: vriddhi
+      POSTGRES_DB: vriddhi_auth
+      POSTGRES_MULTIPLE_DATABASES: vriddhi_auth,vriddhi_content,vriddhi_exam
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vriddhi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: vriddhi-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  discovery-server:
+    build:
+      context: ./backend/discovery-server
+    container_name: vriddhi-discovery-server
+    restart: unless-stopped
+    environment:
+      EUREKA_HOSTNAME: discovery-server
+      SERVER_PORT: 8761
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  auth-service:
+    build:
+      context: ./backend/auth-service
+    container_name: vriddhi-auth-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vriddhi_auth
+      DB_USER: vriddhi
+      DB_PASSWORD: vriddhi
+      JWT_SECRET: &jwt-secret local-dev-secret-change-in-real-environments-please-really
+      SERVER_PORT: 8081
+      EUREKA_URL: http://discovery-server:8761/eureka/
+    ports:
+      - "8081:8081"
+
+  content-service:
+    build:
+      context: ./backend/content-service
+    container_name: vriddhi-content-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vriddhi_content
+      DB_USER: vriddhi
+      DB_PASSWORD: vriddhi
+      JWT_SECRET: *jwt-secret
+      SERVER_PORT: 8082
+      EUREKA_URL: http://discovery-server:8761/eureka/
+    ports:
+      - "8082:8082"
+
+  exam-service:
+    build:
+      context: ./backend/exam-service
+    container_name: vriddhi-exam-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+      content-service:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vriddhi_exam
+      DB_USER: vriddhi
+      DB_PASSWORD: vriddhi
+      JWT_SECRET: *jwt-secret
+      SERVER_PORT: 8083
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      # No longer a host:port — content-service.base-url is the Eureka
+      # service id, resolved by the @LoadBalanced WebClient at runtime.
+      CONTENT_SERVICE_URL: http://content-service
+    ports:
+      - "8083:8083"
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+    container_name: vriddhi-api-gateway
+    restart: unless-stopped
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      content-service:
+        condition: service_started
+      exam-service:
+        condition: service_started
+    environment:
+      JWT_SECRET: *jwt-secret
+      SERVER_PORT: 8080
+      EUREKA_URL: http://discovery-server:8761/eureka/
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

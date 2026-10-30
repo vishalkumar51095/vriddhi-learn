@@ -1,0 +1,32 @@
+server:
+  port: ${SERVER_PORT:8761}
+
+spring:
+  application:
+    name: discovery-server
+
+eureka:
+  instance:
+    hostname: ${EUREKA_HOSTNAME:localhost}
+  client:
+    # This IS the registry — it doesn't register with itself or fetch a registry from elsewhere.
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+  server:
+    # In a one-node dev registry, self-preservation mode just delays noticing
+    # a dead service; fine to leave on for production multi-node setups, off
+    # here so a stopped service disappears from /eureka promptly.
+    enable-self-preservation: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.netflix.eureka: WARN
+    com.netflix.discovery: WARN

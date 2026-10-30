@@ -1,0 +1,53 @@
+server:
+  port: ${SERVER_PORT:8083}
+
+spring:
+  application:
+    name: exam-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:vriddhi_exam}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:vishal}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+jwt:
+  secret: ${JWT_SECRET:change-this-to-a-long-random-secret-in-every-environment-please}
+  issuer: vriddhi-learn
+
+content-service:
+  # With Eureka in the mix this is now a logical service id, not a host:port —
+  # the @LoadBalanced WebClient bean resolves it via the registry (see WebClientConfig).
+  base-url: ${CONTENT_SERVICE_URL:http://content-service}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+logging:
+  level:
+    com.vriddhi.exam: INFO

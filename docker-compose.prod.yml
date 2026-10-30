@@ -1,0 +1,124 @@
+# Vriddhi Learn — production-style stack for a single small server.
+#
+#   cp .env.example .env      # then edit the secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from docker-compose.yml (local dev):
+#   * ONLY the web container publishes ports (80/443). Postgres, Eureka and every service stay on the
+#     internal network — nothing else is reachable from the internet.
+#   * Secrets come from .env (compose refuses to start if they are missing).
+#   * Each JVM is capped so the whole stack fits comfortably in ~3 GB of RAM.
+#   * Redis is left out: no service uses it yet.
+
+x-java: &java-env
+  JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:+UseSerialGC -Xss512k"
+
+x-db: &db-env
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: vriddhi
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+  EUREKA_URL: http://discovery-server:8761/eureka/
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vriddhi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      POSTGRES_DB: vriddhi_auth
+      POSTGRES_MULTIPLE_DATABASES: vriddhi_auth,vriddhi_content,vriddhi_exam
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+      - ./infra/postgres:/infra:ro
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=60"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vriddhi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  discovery-server:
+    build: ./backend/discovery-server
+    restart: unless-stopped
+    environment:
+      <<: *java-env
+      EUREKA_HOSTNAME: discovery-server
+      SERVER_PORT: 8761
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  auth-service:
+    build: ./backend/auth-service
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+    environment:
+      <<: [*java-env, *db-env]
+      DB_NAME: vriddhi_auth
+      SERVER_PORT: 8081
+
+  content-service:
+    build: ./backend/content-service
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+    environment:
+      <<: [*java-env, *db-env]
+      DB_NAME: vriddhi_content
+      SERVER_PORT: 8082
+
+  exam-service:
+    build: ./backend/exam-service
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+      content-service: { condition: service_started }
+    environment:
+      <<: [*java-env, *db-env]
+      DB_NAME: vriddhi_exam
+      SERVER_PORT: 8083
+      CONTENT_SERVICE_URL: http://content-service
+
+  api-gateway:
+    build: ./backend/api-gateway
+    restart: unless-stopped
+    depends_on:
+      discovery-server: { condition: service_healthy }
+      auth-service: { condition: service_started }
+      content-service: { condition: service_started }
+      exam-service: { condition: service_started }
+    environment:
+      <<: *java-env
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      SERVER_PORT: 8080
+      EUREKA_URL: http://discovery-server:8761/eureka/
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

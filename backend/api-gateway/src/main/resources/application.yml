@@ -1,0 +1,78 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=0
+
+        - id: auth-service-admin
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/admin/users/**,/api/admin/teacher-applications/**,/api/admin/stats/users,/api/admin/audit-logs/**,/api/public/stats/users
+          filters:
+            - StripPrefix=0
+
+        - id: content-service-subjects
+          uri: lb://content-service
+          predicates:
+            - Path=/api/categories/**,/api/subjects/**,/api/topics/**
+          filters:
+            - StripPrefix=0
+
+        - id: content-service-questions
+          uri: lb://content-service
+          predicates:
+            - Path=/api/questions/**,/api/admin/stats/content,/api/public/stats/content
+          filters:
+            - StripPrefix=0
+
+        - id: exam-service-exams
+          uri: lb://exam-service
+          predicates:
+            - Path=/api/exams/**,/api/admin/exams/**,/api/admin/stats/exams,/api/public/exams,/api/public/stats/exams
+          filters:
+            - StripPrefix=0
+
+        - id: exam-service-attempts
+          uri: lb://exam-service
+          predicates:
+            - Path=/api/attempts/**
+          filters:
+            - StripPrefix=0
+
+      # /internal/** is deliberately NOT routed — those endpoints are only
+      # reachable service-to-service (content-service <- exam-service),
+      # resolved directly via Eureka, never through the public edge.
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+
+jwt:
+  secret: ${JWT_SECRET:change-this-to-a-long-random-secret-in-every-environment-please}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,gateway
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    com.vriddhi.gateway: INFO
