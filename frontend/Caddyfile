@@ -1,0 +1,21 @@
+# SITE_ADDRESS comes from docker-compose.prod.yml:
+#   ":80"            -> plain HTTP (works with just the server's IP)
+#   "learn.example.com" -> Caddy gets and renews a free Let's Encrypt certificate automatically
+{$SITE_ADDRESS} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy api-gateway:8080
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

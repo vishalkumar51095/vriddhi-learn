@@ -1,0 +1,146 @@
+@import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Theme = light | dark (data-theme on <html>, set before first
+   paint by the inline script in index.html). Accent = amber | indigo | teal
+   (data-accent). Every text/background pair below is checked against WCAG AA
+   by infra/tools/check_contrast.py — run it after changing any colour.
+   --------------------------------------------------------------------------- */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg:#F6F4EE; --surface:#FFFFFF; --surface-2:#EFEBE1;
+  --ink:#14202B; --ink-soft:#33434F; --muted:#56636F;
+  --line:#DDD7C8; --field:#7C8794;
+  --success:#1D6B47; --success-soft:#DCEEE4;
+  --danger:#B0281C;  --danger-soft:#FBE4E0;
+  --info:#5B4B8A;    --info-soft:#EAE5F7;
+  --solid-green:#2A7A53; --solid-amber:#A25800; --solid-purple:#5B4B8A; --solid-red:#B0281C;
+  --accent:#8F5200; --accent-soft:#F6E7CC; --accent-solid:#A05A00; --on-accent:#FFFFFF;
+  --brand-student-from:#1E2A78; --brand-student-to:#3A2C8F;
+  --brand-teacher-from:#0B4B46; --brand-teacher-to:#166B62;
+  --brand-admin-from:#0E1722;   --brand-admin-to:#22344A;
+  --brand-text:#FFFFFF; --brand-text-soft:#D5DEEE;
+  --side-bg:#0F1A26; --side-text:#D3DCE6; --side-muted:#98A8BA; --side-active:#22364D;
+  --shadow:0 1px 2px rgba(20,32,43,.06), 0 8px 24px rgba(20,32,43,.06);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:#0D1620; --surface:#15212E; --surface-2:#1C2B3B;
+  --ink:#EEF2F6; --ink-soft:#C5CFD9; --muted:#9BA9B7;
+  --line:#2A3A4B; --field:#7F8FA0;
+  --success:#6FD0A0; --success-soft:#12291F;
+  --danger:#FF9C8F;  --danger-soft:#33161A;
+  --info:#BBAEF0;    --info-soft:#251F3D;
+  --solid-green:#2A7A53; --solid-amber:#A25800; --solid-purple:#6552A0; --solid-red:#C0392B;
+  --accent:#F2B966; --accent-soft:#2F2413; --accent-solid:#F2B966; --on-accent:#1B1205;
+  --side-bg:#0A121B; --side-text:#D3DCE6; --side-muted:#98A8BA; --side-active:#22364D;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+[data-theme="light"][data-accent="indigo"] { --accent:#4338CA; --accent-soft:#E6E8FF; --accent-solid:#4F46E5; --on-accent:#FFFFFF; }
+[data-theme="dark"][data-accent="indigo"]  { --accent:#AEB8FF; --accent-soft:#1D2248; --accent-solid:#AEB8FF; --on-accent:#0E1233; }
+[data-theme="light"][data-accent="teal"]   { --accent:#0F766E; --accent-soft:#D6F1EC; --accent-solid:#0F766E; --on-accent:#FFFFFF; }
+[data-theme="dark"][data-accent="teal"]    { --accent:#5EEAD4; --accent-soft:#0E2F2C; --accent-solid:#5EEAD4; --on-accent:#06201D; }
+
+/* Map tokens to Tailwind utilities. `inline` keeps them as var() references so a
+   theme switch at runtime takes effect immediately. Existing class names
+   (bg-bg-raised, text-amber, border-line …) keep working. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-field: var(--field);
+  --color-amber: var(--accent);
+  --color-amber-soft: var(--accent-soft);
+  --color-accent-solid: var(--accent-solid);
+  --color-on-accent: var(--on-accent);
+  --color-green: var(--success);
+  --color-green-soft: var(--success-soft);
+  --color-red: var(--danger);
+  --color-red-soft: var(--danger-soft);
+  --color-purple: var(--info);
+  --color-purple-soft: var(--info-soft);
+  --color-solid-green: var(--solid-green);
+  --color-solid-amber: var(--solid-amber);
+  --color-solid-purple: var(--solid-purple);
+  --color-solid-red: var(--solid-red);
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-sans: "Inter", -apple-system, "Segoe UI", sans-serif;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { font-family: var(--font-serif); }
+::placeholder { color: var(--muted); opacity: 1; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+::selection { background: var(--accent-soft); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+
+/* ---- shared components ---- */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:.5rem; padding:.6rem 1.1rem; border-radius:.55rem;
+  font-weight:600; font-size:.9rem; line-height:1.2; border:1px solid transparent; cursor:pointer; transition: filter .15s, background .15s, border-color .15s; text-decoration:none; }
+.btn:disabled { opacity:.55; cursor:not-allowed; }
+.btn-primary { background:var(--accent-solid); color:var(--on-accent); }
+.btn-primary:hover:not(:disabled) { filter:brightness(1.08); }
+.btn-ghost { background:transparent; color:var(--ink); border-color:var(--field); }
+.btn-ghost:hover:not(:disabled) { background:var(--surface-2); }
+.btn-danger { background:var(--solid-red); color:#fff; }
+.btn-danger:hover:not(:disabled) { filter:brightness(1.1); }
+.btn-sm { padding:.35rem .7rem; font-size:.8rem; }
+.input { width:100%; background:var(--surface); color:var(--ink); border:1px solid var(--field); border-radius:.55rem; padding:.65rem .8rem; font-size:.92rem; }
+.input:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:.85rem; box-shadow:var(--shadow); }
+.label { display:block; font-size:.8rem; font-weight:600; color:var(--ink-soft); margin-bottom:.35rem; }
+.table { width:100%; border-collapse:collapse; font-size:.86rem; }
+.table th { text-align:left; padding:.6rem .8rem; color:var(--muted); font-weight:600; font-size:.75rem; letter-spacing:.02em; border-bottom:1px solid var(--line); white-space:nowrap; }
+.table td { padding:.7rem .8rem; border-bottom:1px solid var(--line); vertical-align:middle; }
+.table tr:last-child td { border-bottom:none; }
+.table tbody tr:hover { background:var(--surface-2); }
+.badge { display:inline-flex; align-items:center; gap:.3rem; padding:.15rem .6rem; border-radius:999px; font-size:.72rem; font-weight:600; white-space:nowrap; }
+.badge-accent { background:var(--accent-soft); color:var(--accent); }
+.badge-green { background:var(--success-soft); color:var(--success); }
+.badge-red { background:var(--danger-soft); color:var(--danger); }
+.badge-purple { background:var(--info-soft); color:var(--info); }
+.badge-muted { background:var(--surface-2); color:var(--ink-soft); }
+
+/* portal brand panels (login pages) */
+.brand-student { background: linear-gradient(140deg, var(--brand-student-from), var(--brand-student-to)); }
+.brand-teacher { background: linear-gradient(140deg, var(--brand-teacher-from), var(--brand-teacher-to)); }
+.brand-admin   { background: linear-gradient(140deg, var(--brand-admin-from),   var(--brand-admin-to)); }
+.brand-panel { color: var(--brand-text); }
+.brand-panel .soft { color: var(--brand-text-soft); }
+@keyframes float-in { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform:none; } }
+.float-in { animation: float-in .5s ease both; }
+
+/* ---- interaction primitives ---- */
+.reveal { opacity:0; transform: translateY(14px); transition: opacity .55s ease, transform .55s ease; }
+.reveal-in { opacity:1; transform:none; }
+@keyframes shake { 10%,90% { transform:translateX(-1px); } 20%,80% { transform:translateX(3px); } 30%,50%,70% { transform:translateX(-5px); } 40%,60% { transform:translateX(5px); } }
+.shake { animation: shake .5s ease both; }
+@keyframes pop { 0% { transform:scale(.6); opacity:0; } 60% { transform:scale(1.12); } 100% { transform:scale(1); opacity:1; } }
+.pop { animation: pop .4s ease both; }
+.lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.lift:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: var(--accent); }
+.chip { display:inline-flex; align-items:center; gap:.35rem; padding:.4rem .8rem; border-radius:999px; font-size:.82rem; font-weight:600;
+  border:1px solid var(--field); background:var(--surface); color:var(--ink-soft); cursor:pointer; transition: background .15s, color .15s, border-color .15s, transform .1s; }
+.chip:hover { border-color: var(--accent); color: var(--ink); }
+.chip:active { transform: scale(.96); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.step-dot { display:flex; height:2rem; width:2rem; align-items:center; justify-content:center; border-radius:999px; font-size:.8rem; font-weight:700;
+  border:2px solid var(--line); color:var(--muted); background:var(--surface); transition: all .3s ease; }
+.step-dot[data-state="active"] { border-color: var(--accent); color: var(--accent); }
+.step-dot[data-state="done"] { border-color: var(--solid-green); background: var(--solid-green); color:#fff; }
+.step-line { height:2px; flex:1; background: var(--line); position:relative; overflow:hidden; }
+.step-line::after { content:''; position:absolute; inset:0; background: var(--solid-green); transform: scaleX(0); transform-origin:left; transition: transform .4s ease; }
+.step-line[data-done="true"]::after { transform: scaleX(1); }
+@keyframes slide-in { from { opacity:0; transform: translateX(16px); } to { opacity:1; transform:none; } }
+.slide-in { animation: slide-in .35s ease both; }
+.accordion-body { display:grid; grid-template-rows:0fr; transition: grid-template-rows .25s ease; }
+.accordion-body[data-open="true"] { grid-template-rows:1fr; }
+.accordion-body > div { overflow:hidden; }
+input[type="range"] { accent-color: var(--accent-solid); }
