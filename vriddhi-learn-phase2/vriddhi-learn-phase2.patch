@@ -1,0 +1,1715 @@
+diff --git a/PROJECT_STATUS.md b/PROJECT_STATUS.md
+index 994b510..b19e382 100644
+--- a/PROJECT_STATUS.md
++++ b/PROJECT_STATUS.md
+@@ -1,6 +1,6 @@
+ # Project status
+ 
+-Last updated: 2026-10-30
++Last updated: 2026-11-03
+ 
+ ## Services
+ 
+@@ -10,9 +10,9 @@ Last updated: 2026-10-30
+ | api-gateway | 8080 | none | done (routes for lessons and progress added) |
+ | auth-service | 8081 | vriddhi_auth | done |
+ | content-service | 8082 | vriddhi_content | done (+ `/internal/topics/published`, Java Interview Prep seed V5) |
+-| exam-service | 8083 | vriddhi_exam | done (+ Java mock papers V6) |
++| exam-service | 8083 | vriddhi_exam | done (+ Java mock papers V6, timed daily mock + progress sync V7) |
+ | learning-service | 8084 | vriddhi_learning | NEW: lessons, completion, startup + admin import |
+-| progress-service | 8085 | vriddhi_progress | NEW: results, Leitner revision, daily plan, streak |
++| progress-service | 8085 | vriddhi_progress | NEW: results, Leitner revision, daily plan, streak, internal results (V2) |
+ 
+ ## This change (Java notes, daily practice, progress)
+ 
+@@ -30,11 +30,23 @@ backend, and the full docker-compose flow. Run these locally before deploying:
+ 2. Sign in, open `/learn`, `/daily`, answer a few questions, open `/progress`.
+ 3. `mvn -q test` in `backend/progress-service` and `backend/learning-service`.
+ 
++## Phase 2: timed daily mock
++
++Verified here: migrations exam V7 and progress V2 apply on a real PostgreSQL; the unique "one daily exam per
++learner/category/day" index, owner/date and kind CHECKs, `progress_sync_status` CHECK, the `FOR UPDATE` row-lock
++query, listing filters (daily exams hidden) and the idempotency table all behave correctly; `verify_sql.py` passes
++(its hard-coded seed counts now include the Java content); 7 unit tests for `DailyExamBlueprint` pass (run with minimal
++JUnit shims); syntax check 225 files, 0 errors; frontend build passes.
++
++NOT verified: `mvn compile` / `mvn test` and the running services (Maven Central is blocked in the build sandbox).
++Please test this flow locally: sign in, open `/daily`, press "Start timed mock", answer, submit, then check `/progress`
++(the mock's answers should appear within a minute) and press "View result" on the card.
++
+ ## Known limits and next steps
+ 
+-- Daily plan is generated on demand (no scheduler needed). A per-learner timed "Daily Mock" built through
+-  exam-service is the next step.
+-- Exam results do not feed progress-service yet (only practice answers do).
++- Daily plan and daily mock are generated on demand (no scheduler needed).
++- A due-for-revision question is represented by its topic in the mock (random question from that topic), not pinned.
++- The Dashboard still shows illustrative subject-progress numbers; progress-service can now supply real ones.
+ - No question or lesson editor UI; content is added through seed builders and lesson files.
+ - Coding-question execution (a sandboxed runner) is not built.
+ - AI-drafted questions with an approval queue are planned, not built.
+diff --git a/README.md b/README.md
+index 5e201d2..a569914 100644
+--- a/README.md
++++ b/README.md
+@@ -331,6 +331,35 @@ order: 1
+ The plan is deterministic per learner per day (seeded by user id and date). Due questions drop out of the
+ plan as they are answered. Learner ids always come from the verified JWT.
+ 
++**Timed daily mock (exam-service)**
++
++The mock reuses the exam engine instead of adding a second timer. `POST /api/attempts/daily?category=` builds a
++private `DAILY` exam for the learner for today and starts it through the normal `AttemptService.start()`, so the
++server-owned deadline, auto-submit, palette, scoring and result page all apply.
++
++```
++ POST /api/attempts/daily?category=JAVA_INTERVIEW
++   today's mock already exists?  yes -> resume it, or report it completed (one mock per learner, category and day)
++   no -> progress-service GET /internal/daily-plan  (due revisions, weak topics, new topics)
++         if progress-service is down -> seeded-random mix of the category's topics instead
++      -> create exam kind=DAILY, owner=learner, date=today: 10 questions, 1.5 min each (15 min), no negative marking
++      -> AttemptService.start()  -> /attempts/:id  (existing exam screen)
++ finished or timed out -> exam-service POST /internal/results to progress-service (idempotent on attemptId)
++```
++
++| Endpoint | Purpose |
++|---|---|
++| `POST /api/attempts/daily?category=` | start today's mock, or resume / return its status |
++| `GET /api/attempts/daily/today?category=` | `NOT_STARTED`, `IN_PROGRESS` (with `expiresAt`) or `COMPLETED` (with score) |
++| `GET /internal/daily-plan?userId=&category=` (progress-service) | the plan the mock is built from |
++| `POST /internal/results` (progress-service) | answered questions of a finished attempt; feeds revision boxes, topic accuracy, streak |
++
++Daily exams are hidden from `/api/exams`, the public stats and the admin exam list. Concurrent "start" clicks
++cannot create two attempts (unique index plus a row lock). Results delivery is eventually consistent: a failed
++call leaves the attempt `PENDING` and a scheduler retries it every minute for 24 hours. Only answered,
++auto-gradable questions are reported, so a timed-out mock does not drag accuracy down. Questions due for
++revision are drawn from their topic (not the exact question) for now.
++
+ **Adding new material every day** (no code changes):
+ 
+ 1. Questions: add them to `infra/seed-data/build_java_interview.py` (or a new builder for another
+@@ -367,6 +396,10 @@ teachers (creating and publishing content is still curl/API only).
+ 
+ ## Recently added
+ 
++- **Timed daily mock.** `POST /api/attempts/daily` creates a private DAILY exam from the progress-service plan and
++  starts it through the normal exam engine (server-side clock, auto-submit, result page). Finished attempts are
++  reported to progress-service. New: exam-service migration V7, progress-service migration V2, `/internal/daily-plan`
++  and `/internal/results`, a Today's mock card on the Dashboard and Daily page.
+ - **learning-service and progress-service, Java Interview Prep content.** Study notes reader, 108
+   verified Java questions, three mock exams, daily practice plan with spaced-repetition revision, streak
+   and per-topic progress. See "Study notes, daily practice & progress" above. Added
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/ExamServiceApplication.java b/backend/exam-service/src/main/java/com/vriddhi/exam/ExamServiceApplication.java
+index 5b26b0e..5caa48b 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/ExamServiceApplication.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/ExamServiceApplication.java
+@@ -2,13 +2,14 @@ package com.vriddhi.exam;
+ 
+ import com.vriddhi.exam.config.ContentServiceProperties;
+ import com.vriddhi.exam.config.JwtProperties;
++import com.vriddhi.exam.config.ProgressServiceProperties;
+ import org.springframework.boot.SpringApplication;
+ import org.springframework.boot.autoconfigure.SpringBootApplication;
+ import org.springframework.boot.context.properties.EnableConfigurationProperties;
+ import org.springframework.scheduling.annotation.EnableScheduling;
+ 
+ @SpringBootApplication
+-@EnableConfigurationProperties({JwtProperties.class, ContentServiceProperties.class})
++@EnableConfigurationProperties({JwtProperties.class, ContentServiceProperties.class, ProgressServiceProperties.class})
+ @EnableScheduling
+ public class ExamServiceApplication {
+     public static void main(String[] args) {
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/client/ContentServiceClient.java b/backend/exam-service/src/main/java/com/vriddhi/exam/client/ContentServiceClient.java
+index 0a78988..b9c1117 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/client/ContentServiceClient.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/client/ContentServiceClient.java
+@@ -1,6 +1,7 @@
+ package com.vriddhi.exam.client;
+ 
+ import com.vriddhi.exam.dto.ContentQuestionDto;
++import com.vriddhi.exam.dto.ContentTopicDto;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.stereotype.Component;
+ import org.springframework.web.reactive.function.client.WebClient;
+@@ -21,6 +22,16 @@ public class ContentServiceClient {
+ 
+     private final WebClient contentServiceWebClient;
+ 
++    /** Topics that have at least one published question (content-service GET /internal/topics/published). */
++    public List<ContentTopicDto> publishedTopics() {
++        return contentServiceWebClient.get()
++                .uri("/internal/topics/published")
++                .retrieve()
++                .bodyToFlux(ContentTopicDto.class)
++                .collectList()
++                .block();
++    }
++
+     public List<ContentQuestionDto> fetchRandomQuestionsForTopics(List<UUID> topicIds, int count) {
+         return contentServiceWebClient.get()
+                 .uri(uriBuilder -> uriBuilder.path("/internal/questions/random")
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/client/ProgressClient.java b/backend/exam-service/src/main/java/com/vriddhi/exam/client/ProgressClient.java
+new file mode 100644
+index 0000000..ca39e29
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/client/ProgressClient.java
+@@ -0,0 +1,47 @@
++package com.vriddhi.exam.client;
++
++import com.vriddhi.exam.dto.ProgressDailyPlanDto;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Component;
++import org.springframework.web.reactive.function.client.WebClient;
++
++import java.time.Duration;
++import java.util.List;
++import java.util.UUID;
++
++/** Calls progress-service's /internal endpoints (service-to-service, role EXAM_SERVICE). */
++@Component
++@RequiredArgsConstructor
++public class ProgressClient {
++
++    private static final Duration TIMEOUT = Duration.ofSeconds(5);
++
++    private final WebClient progressServiceWebClient;
++
++    public ProgressDailyPlanDto dailyPlan(UUID userId, String category) {
++        return progressServiceWebClient.get()
++                .uri(uriBuilder -> uriBuilder.path("/internal/daily-plan")
++                        .queryParam("userId", userId)
++                        .queryParam("category", category)
++                        .build())
++                .retrieve()
++                .bodyToMono(ProgressDailyPlanDto.class)
++                .block(TIMEOUT);
++    }
++
++    /** Idempotent on the progress side: the same attemptId is only ever applied once. */
++    public void postResults(UUID attemptId, UUID userId, List<ResultItem> results) {
++        progressServiceWebClient.post()
++                .uri("/internal/results")
++                .bodyValue(new ResultsRequest(attemptId, userId, results))
++                .retrieve()
++                .toBodilessEntity()
++                .block(TIMEOUT);
++    }
++
++    public record ResultItem(UUID questionId, UUID topicId, String topicName, String subjectName, boolean correct) {
++    }
++
++    public record ResultsRequest(UUID attemptId, UUID userId, List<ResultItem> results) {
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/config/ProgressServiceProperties.java b/backend/exam-service/src/main/java/com/vriddhi/exam/config/ProgressServiceProperties.java
+new file mode 100644
+index 0000000..f2deb43
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/config/ProgressServiceProperties.java
+@@ -0,0 +1,7 @@
++package com.vriddhi.exam.config;
++
++import org.springframework.boot.context.properties.ConfigurationProperties;
++
++@ConfigurationProperties(prefix = "progress-service")
++public record ProgressServiceProperties(String baseUrl) {
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/config/WebClientConfig.java b/backend/exam-service/src/main/java/com/vriddhi/exam/config/WebClientConfig.java
+index ad80145..7b14c3e 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/config/WebClientConfig.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/config/WebClientConfig.java
+@@ -31,4 +31,16 @@ public class WebClientConfig {
+                         ClientRequest.from(request).headers(h -> h.setBearerAuth(tokens.token())).build()))
+                 .build();
+     }
++
++    /** Same pattern for progress-service. clone() keeps this builder's baseUrl and filters separate from the content client's. */
++    @Bean
++    public WebClient progressServiceWebClient(WebClient.Builder loadBalancedWebClientBuilder,
++                                               ProgressServiceProperties properties,
++                                               InternalTokenProvider tokens) {
++        return loadBalancedWebClientBuilder.clone()
++                .baseUrl(properties.baseUrl())
++                .filter((request, next) -> next.exchange(
++                        ClientRequest.from(request).headers(h -> h.setBearerAuth(tokens.token())).build()))
++                .build();
++    }
+ }
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/controller/DailyMockController.java b/backend/exam-service/src/main/java/com/vriddhi/exam/controller/DailyMockController.java
+new file mode 100644
+index 0000000..c6e8f2a
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/controller/DailyMockController.java
+@@ -0,0 +1,37 @@
++package com.vriddhi.exam.controller;
++
++import com.vriddhi.exam.dto.DailyMockStatus;
++import com.vriddhi.exam.service.DailyMockService;
++import lombok.RequiredArgsConstructor;
++import org.springframework.security.core.Authentication;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.UUID;
++
++/** Today's timed mock. The attempt itself is then taken through the normal /api/attempts/{id}/... endpoints. */
++@RestController
++@RequestMapping("/api/attempts/daily")
++@RequiredArgsConstructor
++public class DailyMockController {
++
++    private final DailyMockService dailyMockService;
++
++    /** Starts today's mock for this category, or resumes / reports the one that already exists. */
++    @PostMapping
++    public DailyMockStatus start(@RequestParam String category, Authentication authentication) {
++        return dailyMockService.startOrResume(userId(authentication), category);
++    }
++
++    @GetMapping("/today")
++    public DailyMockStatus today(@RequestParam String category, Authentication authentication) {
++        return dailyMockService.today(userId(authentication), category);
++    }
++
++    private UUID userId(Authentication authentication) {
++        return UUID.fromString((String) authentication.getPrincipal());
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/dao/ExamStatsDao.java b/backend/exam-service/src/main/java/com/vriddhi/exam/dao/ExamStatsDao.java
+index df6ff87..9874e3d 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/dao/ExamStatsDao.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/dao/ExamStatsDao.java
+@@ -22,7 +22,7 @@ public class ExamStatsDao {
+ 
+     // test-params: {}
+     private static final String PUBLIC_COUNTS = """
+-            SELECT (SELECT COUNT(*) FROM exams WHERE status = 'PUBLISHED') AS published_exams,
++            SELECT (SELECT COUNT(*) FROM exams WHERE status = 'PUBLISHED' AND kind = 'STANDARD') AS published_exams,
+                    (SELECT COUNT(*) FROM exam_attempts WHERE status <> 'IN_PROGRESS') AS attempts_taken
+             """;
+ 
+@@ -32,7 +32,7 @@ public class ExamStatsDao {
+                    (SELECT COUNT(*) FROM exam_sections s WHERE s.exam_id = e.id) AS sections,
+                    COALESCE((SELECT SUM(s.question_count) FROM exam_sections s WHERE s.exam_id = e.id), 0) AS total_questions
+               FROM exams e
+-             WHERE e.status = 'PUBLISHED'
++             WHERE e.status = 'PUBLISHED' AND e.kind = 'STANDARD'
+              ORDER BY e.created_at, e.title
+             """;
+ 
+@@ -44,11 +44,12 @@ public class ExamStatsDao {
+                    (SELECT COUNT(*) FROM exam_attempts a WHERE a.exam_id = e.id) AS attempts,
+                    (SELECT AVG(a.score) FROM exam_attempts a WHERE a.exam_id = e.id AND a.status <> 'IN_PROGRESS') AS avg_score
+               FROM exams e
++             WHERE e.kind = 'STANDARD'
+              ORDER BY e.created_at DESC, e.title
+             """;
+ 
+     // test-params: {}
+-    private static final String EXAMS_BY_STATUS = "SELECT status AS k, COUNT(*) AS cnt FROM exams GROUP BY status ORDER BY status";
++    private static final String EXAMS_BY_STATUS = "SELECT status AS k, COUNT(*) AS cnt FROM exams WHERE kind = 'STANDARD' GROUP BY status ORDER BY status";
+ 
+     // test-params: {}
+     private static final String ATTEMPT_TOTALS = """
+@@ -73,6 +74,7 @@ public class ExamStatsDao {
+             SELECT e.title, COUNT(a.id) AS attempts,
+                    AVG(a.score) FILTER (WHERE a.status <> 'IN_PROGRESS') AS avg_score
+               FROM exams e LEFT JOIN exam_attempts a ON a.exam_id = e.id
++             WHERE e.kind = 'STANDARD'
+              GROUP BY e.id, e.title
+              ORDER BY attempts DESC, e.title
+              LIMIT 5
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ContentTopicDto.java b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ContentTopicDto.java
+new file mode 100644
+index 0000000..4ae81e5
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ContentTopicDto.java
+@@ -0,0 +1,13 @@
++package com.vriddhi.exam.dto;
++
++import java.util.UUID;
++
++/** Mirrors content-service's PublishedTopicResponse. */
++public record ContentTopicDto(
++        UUID topicId,
++        String topicName,
++        String subjectName,
++        String categoryCode,
++        long publishedQuestions
++) {
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/dto/DailyMockStatus.java b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/DailyMockStatus.java
+new file mode 100644
+index 0000000..a18ad8c
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/DailyMockStatus.java
+@@ -0,0 +1,25 @@
++package com.vriddhi.exam.dto;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++/**
++ * state: NOT_STARTED (nothing yet today), IN_PROGRESS (attemptId + expiresAt say how long is left) or
++ * COMPLETED (submitted or timed out; open /api/attempts/{attemptId}/result for the full result).
++ * score and correctCount are filled once the attempt has been finalized.
++ */
++public record DailyMockStatus(
++        String state,
++        UUID examId,
++        UUID attemptId,
++        Instant expiresAt,
++        Integer durationMinutes,
++        Integer totalQuestions,
++        BigDecimal score,
++        Integer correctCount
++) {
++    public static DailyMockStatus notStarted() {
++        return new DailyMockStatus("NOT_STARTED", null, null, null, null, null, null, null);
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ProgressDailyPlanDto.java b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ProgressDailyPlanDto.java
+new file mode 100644
+index 0000000..b7099e9
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/dto/ProgressDailyPlanDto.java
+@@ -0,0 +1,23 @@
++package com.vriddhi.exam.dto;
++
++import java.util.List;
++import java.util.UUID;
++
++/** Mirrors progress-service's DailyPlan. The date stays a plain string; exam-service only needs the items. */
++public record ProgressDailyPlanDto(
++        String date,
++        String categoryCode,
++        int totalQuestions,
++        List<Item> items
++) {
++    public record Item(
++            String kind,
++            UUID questionId,
++            UUID topicId,
++            String topicName,
++            String subjectName,
++            int count,
++            String reason
++    ) {
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/AttemptQuestion.java b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/AttemptQuestion.java
+index c9d2245..7d6ee73 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/AttemptQuestion.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/AttemptQuestion.java
+@@ -31,6 +31,15 @@ public class AttemptQuestion {
+     @Column(name = "sort_order", nullable = false)
+     private int sortOrder;
+ 
++    @Column(name = "topic_id")
++    private UUID topicId;
++
++    @Column(name = "topic_name", length = 150)
++    private String topicName;
++
++    @Column(name = "subject_name", length = 150)
++    private String subjectName;
++
+     @Column(name = "question_id", nullable = false)
+     private UUID questionId;
+ 
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/Exam.java b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/Exam.java
+index 67ecd2f..d0a8f81 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/Exam.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/Exam.java
+@@ -7,6 +7,7 @@ import lombok.Setter;
+ 
+ import java.math.BigDecimal;
+ import java.time.Instant;
++import java.time.LocalDate;
+ import java.util.UUID;
+ 
+ @Entity
+@@ -40,6 +41,18 @@ public class Exam {
+     @Column(nullable = false, length = 20)
+     private ExamStatus status = ExamStatus.DRAFT;
+ 
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, length = 20)
++    private ExamKind kind = ExamKind.STANDARD;
++
++    /** Only set for DAILY exams: the one learner who may take it. */
++    @Column(name = "owner_user_id")
++    private UUID ownerUserId;
++
++    /** Only set for DAILY exams: the (UTC) day it was generated for. */
++    @Column(name = "plan_date")
++    private LocalDate planDate;
++
+     @Column(name = "created_by", nullable = false)
+     private UUID createdBy;
+ 
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamAttempt.java b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamAttempt.java
+index 9e7c05a..2a51675 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamAttempt.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamAttempt.java
+@@ -59,6 +59,10 @@ public class ExamAttempt {
+     @Column(name = "max_sort_order_reached", nullable = false)
+     private int maxSortOrderReached;
+ 
++    /** NOT_APPLICABLE, PENDING (finished, results not yet delivered to progress-service) or DONE. */
++    @Column(name = "progress_sync_status", nullable = false, length = 20)
++    private String progressSyncStatus = "NOT_APPLICABLE";
++
+     public boolean isExpired() {
+         return Instant.now().isAfter(expiresAt);
+     }
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamKind.java b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamKind.java
+new file mode 100644
+index 0000000..b9d12c3
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/entity/ExamKind.java
+@@ -0,0 +1,7 @@
++package com.vriddhi.exam.entity;
++
++/** STANDARD: a published paper everyone can take. DAILY: a private mock generated for one learner for one day. */
++public enum ExamKind {
++    STANDARD,
++    DAILY
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/exception/GlobalExceptionHandler.java b/backend/exam-service/src/main/java/com/vriddhi/exam/exception/GlobalExceptionHandler.java
+index 03543a8..12b16b2 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/exception/GlobalExceptionHandler.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/exception/GlobalExceptionHandler.java
+@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
+         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(409, "Conflict", ex.getMessage()));
+     }
+ 
++    @ExceptionHandler(UpstreamUnavailableException.class)
++    public ResponseEntity<ApiError> handleUpstreamUnavailable(UpstreamUnavailableException ex) {
++        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
++                .body(ApiError.of(503, "Service Unavailable", ex.getMessage()));
++    }
++
+     @ExceptionHandler(Exception.class)
+     public ResponseEntity<ApiError> handleGeneric(Exception ex) {
+         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/exception/UpstreamUnavailableException.java b/backend/exam-service/src/main/java/com/vriddhi/exam/exception/UpstreamUnavailableException.java
+new file mode 100644
+index 0000000..63a67de
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/exception/UpstreamUnavailableException.java
+@@ -0,0 +1,8 @@
++package com.vriddhi.exam.exception;
++
++/** A service this one depends on (content-service, progress-service) could not be reached. Maps to HTTP 503. */
++public class UpstreamUnavailableException extends RuntimeException {
++    public UpstreamUnavailableException(String message, Throwable cause) {
++        super(message, cause);
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamAttemptRepository.java b/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamAttemptRepository.java
+index ea98418..ca26c63 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamAttemptRepository.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamAttemptRepository.java
+@@ -3,6 +3,12 @@ package com.vriddhi.exam.repository;
+ import com.vriddhi.exam.entity.AttemptStatus;
+ import com.vriddhi.exam.entity.ExamAttempt;
+ import org.springframework.data.domain.Page;
++import org.springframework.transaction.annotation.Propagation;
++import org.springframework.transaction.annotation.Transactional;
++import org.springframework.data.repository.query.Param;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.jpa.repository.Modifying;
++import java.time.Instant;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+@@ -14,4 +20,15 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, UUID>
+     Page<ExamAttempt> findByUserIdOrderByStartedAtDesc(UUID userId, Pageable pageable);
+     Optional<ExamAttempt> findByIdAndUserId(UUID id, UUID userId);
+     List<ExamAttempt> findByStatus(AttemptStatus status);
++
++    Optional<ExamAttempt> findFirstByExamIdAndUserIdOrderByStartedAtDesc(UUID examId, UUID userId);
++
++    List<ExamAttempt> findByProgressSyncStatusAndSubmittedAtAfter(String progressSyncStatus, Instant after);
++
++    // REQUIRES_NEW: this is called from an afterCommit callback, where joining the (already committed)
++    // original transaction would silently drop the update.
++    @Modifying
++    @Transactional(propagation = Propagation.REQUIRES_NEW)
++    @Query("update ExamAttempt a set a.progressSyncStatus = :status where a.id = :id")
++    int updateProgressSyncStatus(@Param("id") UUID id, @Param("status") String status);
+ }
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamRepository.java b/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamRepository.java
+index c0b5cd7..2cedd2b 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamRepository.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/repository/ExamRepository.java
+@@ -3,6 +3,13 @@ package com.vriddhi.exam.repository;
+ import com.vriddhi.exam.entity.Exam;
+ import com.vriddhi.exam.entity.ExamStatus;
+ import org.springframework.data.domain.Page;
++import java.util.Optional;
++import java.time.LocalDate;
++import org.springframework.data.repository.query.Param;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.jpa.repository.Lock;
++import jakarta.persistence.LockModeType;
++import com.vriddhi.exam.entity.ExamKind;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+@@ -11,4 +18,16 @@ import java.util.UUID;
+ public interface ExamRepository extends JpaRepository<Exam, UUID> {
+     Page<Exam> findByStatusAndCategoryCode(ExamStatus status, String categoryCode, Pageable pageable);
+     Page<Exam> findByStatus(ExamStatus status, Pageable pageable);
++
++    Page<Exam> findByStatusAndKindAndCategoryCode(ExamStatus status, ExamKind kind, String categoryCode, Pageable pageable);
++
++    Page<Exam> findByStatusAndKind(ExamStatus status, ExamKind kind, Pageable pageable);
++
++    Optional<Exam> findByOwnerUserIdAndCategoryCodeAndPlanDateAndKind(UUID ownerUserId, String categoryCode,
++                                                                      LocalDate planDate, ExamKind kind);
++
++    /** Row lock: serializes concurrent "start my daily mock" requests so a learner never gets two attempts. */
++    @Lock(LockModeType.PESSIMISTIC_WRITE)
++    @Query("select e from Exam e where e.id = :id")
++    Optional<Exam> findByIdForUpdate(@Param("id") UUID id);
+ }
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/AttemptService.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/AttemptService.java
+index f008f09..09067b5 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/service/AttemptService.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/AttemptService.java
+@@ -7,6 +7,9 @@ import com.vriddhi.exam.exception.AttemptExpiredException;
+ import com.vriddhi.exam.exception.BadRequestException;
+ import com.vriddhi.exam.exception.NotFoundException;
+ import com.vriddhi.exam.repository.*;
++import com.vriddhi.exam.entity.ExamKind;
++import org.springframework.transaction.support.TransactionSynchronization;
++import org.springframework.transaction.support.TransactionSynchronizationManager;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+@@ -35,6 +38,7 @@ public class AttemptService {
+     private final AttemptQuestionOptionRepository attemptOptionRepository;
+     private final AttemptAnswerRepository attemptAnswerRepository;
+     private final ContentServiceClient contentServiceClient;
++    private final ProgressSyncService progressSyncService;
+ 
+     @Transactional
+     public StartAttemptResponse start(UUID examId, UUID userId) {
+@@ -42,6 +46,10 @@ public class AttemptService {
+         if (exam.getStatus() != ExamStatus.PUBLISHED) {
+             throw new BadRequestException("This exam is not currently available");
+         }
++        // A daily mock is private to the learner it was generated for.
++        if (exam.getKind() == ExamKind.DAILY && !userId.equals(exam.getOwnerUserId())) {
++            throw new NotFoundException("Exam not found");
++        }
+ 
+         List<ExamSection> sections = sectionRepository.findByExamIdOrderBySortOrder(examId);
+         if (sections.isEmpty()) {
+@@ -69,6 +77,9 @@ public class AttemptService {
+                 aq.setSectionId(section.getId());
+                 aq.setSectionName(section.getName());
+                 aq.setSortOrder(globalOrder++);
++                aq.setTopicId(q.topicId());
++                aq.setTopicName(q.topicName());
++                aq.setSubjectName(q.subjectName());
+                 aq.setQuestionId(q.id());
+                 aq.setQuestionVersionId(q.id()); // content-service response is already the current version
+                 aq.setQuestionType(q.type());
+@@ -270,7 +281,7 @@ public class AttemptService {
+         Exam exam = examRepository.findById(attempt.getExamId()).orElseThrow(() -> new NotFoundException("Exam not found"));
+         List<AttemptQuestion> questions = attemptQuestionRepository.findByAttemptIdOrderBySortOrder(attempt.getId());
+ 
+-        int correct = 0, wrong = 0, skipped = 0, manualPending = 0;
++        int correct = 0, wrong = 0, skipped = 0, manualPending = 0, syncable = 0;
+         Map<String, int[]> sectionTally = new LinkedHashMap<>(); // name -> [correct, gradable]
+ 
+         for (AttemptQuestion q : questions) {
+@@ -287,6 +298,7 @@ public class AttemptService {
+             tally[1]++; // gradable
+ 
+             if (!hasAnswer) { skipped++; continue; }
++            if (q.getTopicId() != null) syncable++; // answered and gradable: worth reporting to progress-service
+ 
+             List<AttemptQuestionOption> options = attemptOptionRepository.findByAttemptQuestionIdOrderBySortOrder(q.getId());
+             Set<UUID> correctIds = options.stream().filter(AttemptQuestionOption::isCorrect).map(AttemptQuestionOption::getId).collect(Collectors.toSet());
+@@ -311,7 +323,11 @@ public class AttemptService {
+         attempt.setWrongCount(wrong);
+         attempt.setSkippedCount(skipped);
+         attempt.setManualPendingCount(manualPending);
++        attempt.setProgressSyncStatus(syncable > 0 ? "PENDING" : "NOT_APPLICABLE");
+         attemptRepository.save(attempt);
++        if (syncable > 0) {
++            scheduleProgressSync(attempt.getId());
++        }
+ 
+         List<AttemptResultResponse.SectionResult> sectionResults = sectionTally.entrySet().stream()
+                 .map(e -> new AttemptResultResponse.SectionResult(e.getKey(), e.getValue()[0], e.getValue()[1]))
+@@ -324,6 +340,22 @@ public class AttemptService {
+         );
+     }
+ 
++    /**
++     * Reports the finished attempt to progress-service only after this transaction has committed, so a
++     * rolled-back submit is never reported. If the call fails the attempt stays PENDING and
++     * ProgressSyncScheduler retries it.
++     */
++    private void scheduleProgressSync(UUID attemptId) {
++        if (TransactionSynchronizationManager.isSynchronizationActive()) {
++            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
++                @Override
++                public void afterCommit() {
++                    progressSyncService.sync(attemptId);
++                }
++            });
++        }
++    }
++
+     private AttemptResultResponse buildResult(ExamAttempt attempt) {
+         List<AttemptQuestion> questions = attemptQuestionRepository.findByAttemptIdOrderBySortOrder(attempt.getId());
+         // Recompute the section breakdown for display without re-scoring (score is already persisted).
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyExamBlueprint.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyExamBlueprint.java
+new file mode 100644
+index 0000000..d48e190
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyExamBlueprint.java
+@@ -0,0 +1,117 @@
++package com.vriddhi.exam.service;
++
++import com.vriddhi.exam.dto.ContentTopicDto;
++import com.vriddhi.exam.dto.ProgressDailyPlanDto;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Random;
++import java.util.UUID;
++
++/**
++ * Pure logic (no Spring, no database) that turns a daily plan into exam sections and a time limit.
++ * Kept separate so it can be unit-tested on its own.
++ *
++ * A plan item is either one specific question that is due for revision (kind QUESTION) or "N questions
++ * from this topic" (kind TOPIC). Exam sections can only draw random questions from topics, so a due
++ * question is represented by its topic here.
++ */
++public final class DailyExamBlueprint {
++
++    public static final double MINUTES_PER_QUESTION = 1.5;
++    public static final int MIN_MINUTES = 5;
++    static final int FALLBACK_TOPICS = 5;
++    static final int FALLBACK_PER_TOPIC = 2;
++
++    private static final List<String> REASON_ORDER = List.of("DUE_FOR_REVIEW", "WEAK_TOPIC", "NEW_TOPIC", "MIXED_REVIEW");
++
++    private DailyExamBlueprint() {
++    }
++
++    public record SectionSpec(String name, List<UUID> topicIds, int questionCount) {
++    }
++
++    /** One section per reason (Revision, Weak topics, New topics, Mixed review), in that fixed order. */
++    public static List<SectionSpec> sectionsFromPlan(List<ProgressDailyPlanDto.Item> items) {
++        if (items == null || items.isEmpty()) {
++            return List.of();
++        }
++        Map<String, List<ProgressDailyPlanDto.Item>> byReason = new LinkedHashMap<>();
++        for (String reason : REASON_ORDER) {
++            byReason.put(reason, new ArrayList<>());
++        }
++        for (ProgressDailyPlanDto.Item item : items) {
++            if (item.count() <= 0 || item.topicId() == null) {
++                continue;
++            }
++            String key = byReason.containsKey(item.reason()) ? item.reason() : "MIXED_REVIEW";
++            byReason.get(key).add(item);
++        }
++        List<SectionSpec> sections = new ArrayList<>();
++        for (Map.Entry<String, List<ProgressDailyPlanDto.Item>> entry : byReason.entrySet()) {
++            if (entry.getValue().isEmpty()) {
++                continue;
++            }
++            LinkedHashSet<UUID> topics = new LinkedHashSet<>();
++            int count = 0;
++            for (ProgressDailyPlanDto.Item item : entry.getValue()) {
++                topics.add(item.topicId());
++                count += item.count();
++            }
++            sections.add(new SectionSpec(sectionName(entry.getKey()), new ArrayList<>(topics), count));
++        }
++        return sections;
++    }
++
++    /** Used when progress-service is unavailable: a seeded-random mix of topics from the category. */
++    public static List<SectionSpec> fallbackSections(List<ContentTopicDto> catalog, String categoryCode, long seed) {
++        List<ContentTopicDto> candidates = new ArrayList<>();
++        if (catalog != null) {
++            for (ContentTopicDto topic : catalog) {
++                if (categoryCode == null || categoryCode.equals(topic.categoryCode())) {
++                    candidates.add(topic);
++                }
++            }
++        }
++        if (candidates.isEmpty()) {
++            return List.of();
++        }
++        Collections.shuffle(candidates, new Random(seed));
++        List<UUID> topicIds = new ArrayList<>();
++        int total = 0;
++        for (ContentTopicDto topic : candidates.subList(0, Math.min(FALLBACK_TOPICS, candidates.size()))) {
++            int take = (int) Math.min(FALLBACK_PER_TOPIC, topic.publishedQuestions());
++            if (take > 0) {
++                topicIds.add(topic.topicId());
++                total += take;
++            }
++        }
++        return total == 0 ? List.of() : List.of(new SectionSpec(sectionName("MIXED_REVIEW"), topicIds, total));
++    }
++
++    public static int totalQuestions(List<SectionSpec> sections) {
++        int total = 0;
++        for (SectionSpec section : sections) {
++            total += section.questionCount();
++        }
++        return total;
++    }
++
++    /** 1.5 minutes per question, never less than MIN_MINUTES (10 questions = 15 minutes). */
++    public static int durationMinutes(int totalQuestions) {
++        return Math.max(MIN_MINUTES, (int) Math.ceil(totalQuestions * MINUTES_PER_QUESTION));
++    }
++
++    static String sectionName(String reason) {
++        return switch (reason) {
++            case "DUE_FOR_REVIEW" -> "Revision";
++            case "WEAK_TOPIC" -> "Weak topics";
++            case "NEW_TOPIC" -> "New topics";
++            default -> "Mixed review";
++        };
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyMockService.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyMockService.java
+new file mode 100644
+index 0000000..40d30c6
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/DailyMockService.java
+@@ -0,0 +1,178 @@
++package com.vriddhi.exam.service;
++
++import com.vriddhi.exam.client.ContentServiceClient;
++import com.vriddhi.exam.client.ProgressClient;
++import com.vriddhi.exam.dto.ContentTopicDto;
++import com.vriddhi.exam.dto.DailyMockStatus;
++import com.vriddhi.exam.dto.ProgressDailyPlanDto;
++import com.vriddhi.exam.dto.StartAttemptResponse;
++import com.vriddhi.exam.entity.AttemptStatus;
++import com.vriddhi.exam.entity.Exam;
++import com.vriddhi.exam.entity.ExamAttempt;
++import com.vriddhi.exam.entity.ExamKind;
++import com.vriddhi.exam.entity.ExamSection;
++import com.vriddhi.exam.entity.ExamStatus;
++import com.vriddhi.exam.entity.NavigationMode;
++import com.vriddhi.exam.exception.BadRequestException;
++import com.vriddhi.exam.exception.NotFoundException;
++import com.vriddhi.exam.exception.UpstreamUnavailableException;
++import com.vriddhi.exam.repository.AttemptQuestionRepository;
++import com.vriddhi.exam.repository.ExamAttemptRepository;
++import com.vriddhi.exam.repository.ExamRepository;
++import com.vriddhi.exam.repository.ExamSectionRepository;
++import com.vriddhi.exam.repository.SectionTopicDao;
++import com.vriddhi.exam.service.DailyExamBlueprint.SectionSpec;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.dao.DataIntegrityViolationException;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.PlatformTransactionManager;
++import org.springframework.transaction.support.TransactionTemplate;
++
++import java.math.BigDecimal;
++import java.time.LocalDate;
++import java.time.ZoneOffset;
++import java.util.List;
++import java.util.Objects;
++import java.util.Optional;
++import java.util.UUID;
++
++/**
++ * The timed daily mock. It does not have its own timer or scoring: it creates a private DAILY exam for the
++ * learner for today (sections come from progress-service's daily plan) and then starts it through the normal
++ * AttemptService.start(), so the server-owned deadline, auto-submit, palette, scoring and result page all apply.
++ *
++ * One mock per learner, category and day: calling start again resumes the attempt or returns its status.
++ * Remote calls (progress-service, content-service) are made outside any database transaction.
++ */
++@Slf4j
++@Service
++@RequiredArgsConstructor
++public class DailyMockService {
++
++    private final ExamRepository examRepository;
++    private final ExamSectionRepository sectionRepository;
++    private final SectionTopicDao sectionTopicDao;
++    private final ExamAttemptRepository attemptRepository;
++    private final AttemptQuestionRepository attemptQuestionRepository;
++    private final AttemptService attemptService;
++    private final ProgressClient progressClient;
++    private final ContentServiceClient contentServiceClient;
++    private final PlatformTransactionManager transactionManager;
++
++    /** Starts today's mock, or returns the status of the one that already exists. */
++    public DailyMockStatus startOrResume(UUID userId, String category) {
++        LocalDate today = LocalDate.now(ZoneOffset.UTC);
++        Exam exam = findOrCreateExam(userId, category, today);
++        return new TransactionTemplate(transactionManager).execute(tx -> startOnce(exam, userId));
++    }
++
++    /** Read-only status for the UI (dashboard card and the Daily page). */
++    public DailyMockStatus today(UUID userId, String category) {
++        LocalDate today = LocalDate.now(ZoneOffset.UTC);
++        Optional<Exam> exam = findExam(userId, category, today);
++        if (exam.isEmpty()) {
++            return DailyMockStatus.notStarted();
++        }
++        return attemptRepository.findFirstByExamIdAndUserIdOrderByStartedAtDesc(exam.get().getId(), userId)
++                .map(attempt -> statusOf(exam.get(), attempt))
++                .orElse(DailyMockStatus.notStarted());
++    }
++
++    private DailyMockStatus startOnce(Exam exam, UUID userId) {
++        // Row lock: two quick clicks cannot both create an attempt for the same exam.
++        examRepository.findByIdForUpdate(exam.getId()).orElseThrow(() -> new NotFoundException("Exam not found"));
++        Optional<ExamAttempt> existing = attemptRepository.findFirstByExamIdAndUserIdOrderByStartedAtDesc(exam.getId(), userId);
++        if (existing.isPresent()) {
++            return statusOf(exam, existing.get());
++        }
++        StartAttemptResponse started = attemptService.start(exam.getId(), userId);
++        ExamAttempt attempt = attemptRepository.findById(started.attemptId())
++                .orElseThrow(() -> new NotFoundException("Attempt not found"));
++        return statusOf(exam, attempt);
++    }
++
++    private Exam findOrCreateExam(UUID userId, String category, LocalDate today) {
++        Optional<Exam> existing = findExam(userId, category, today);
++        if (existing.isPresent()) {
++            return existing.get();
++        }
++        List<SectionSpec> specs = buildSpecs(userId, category, today);
++        try {
++            return new TransactionTemplate(transactionManager).execute(tx -> createExam(userId, category, today, specs));
++        } catch (DataIntegrityViolationException race) {
++            // Another request created today's exam between our lookup and our insert: use theirs.
++            return findExam(userId, category, today).orElseThrow(() -> race);
++        }
++    }
++
++    private Optional<Exam> findExam(UUID userId, String category, LocalDate today) {
++        return examRepository.findByOwnerUserIdAndCategoryCodeAndPlanDateAndKind(userId, category, today, ExamKind.DAILY);
++    }
++
++    private List<SectionSpec> buildSpecs(UUID userId, String category, LocalDate today) {
++        try {
++            ProgressDailyPlanDto plan = progressClient.dailyPlan(userId, category);
++            List<SectionSpec> specs = plan == null ? List.of() : DailyExamBlueprint.sectionsFromPlan(plan.items());
++            if (!specs.isEmpty()) {
++                return specs;
++            }
++        } catch (RuntimeException ex) {
++            log.warn("progress-service daily plan unavailable, using a random mix instead: {}", ex.getMessage());
++        }
++        List<ContentTopicDto> catalog;
++        try {
++            catalog = contentServiceClient.publishedTopics();
++        } catch (RuntimeException ex) {
++            throw new UpstreamUnavailableException("The question catalog is temporarily unavailable. Please try again.", ex);
++        }
++        List<SectionSpec> fallback = DailyExamBlueprint.fallbackSections(catalog, category, Objects.hash(userId, today.toEpochDay()));
++        if (fallback.isEmpty()) {
++            throw new BadRequestException("There are no published questions in this category yet");
++        }
++        return fallback;
++    }
++
++    private Exam createExam(UUID userId, String category, LocalDate today, List<SectionSpec> specs) {
++        Exam exam = new Exam();
++        exam.setTitle("Daily Mock " + today);
++        exam.setCategoryCode(category);
++        exam.setDurationMinutes(DailyExamBlueprint.durationMinutes(DailyExamBlueprint.totalQuestions(specs)));
++        exam.setNegativeMarking(BigDecimal.ZERO);
++        exam.setNavigationMode(NavigationMode.FREE);
++        exam.setStatus(ExamStatus.PUBLISHED);
++        exam.setKind(ExamKind.DAILY);
++        exam.setOwnerUserId(userId);
++        exam.setPlanDate(today);
++        exam.setCreatedBy(userId);
++        exam = examRepository.saveAndFlush(exam);
++
++        int order = 0;
++        for (SectionSpec spec : specs) {
++            ExamSection section = new ExamSection();
++            section.setExamId(exam.getId());
++            section.setName(spec.name());
++            section.setSortOrder(order++);
++            section.setQuestionCount(spec.questionCount());
++            section = sectionRepository.save(section);
++            for (UUID topicId : spec.topicIds()) {
++                sectionTopicDao.link(section.getId(), topicId);
++            }
++        }
++        return exam;
++    }
++
++    private DailyMockStatus statusOf(Exam exam, ExamAttempt attempt) {
++        boolean running = attempt.getStatus() == AttemptStatus.IN_PROGRESS && !attempt.isExpired();
++        int questionCount = attemptQuestionRepository.findByAttemptIdOrderBySortOrder(attempt.getId()).size();
++        return new DailyMockStatus(
++                running ? "IN_PROGRESS" : "COMPLETED",
++                exam.getId(),
++                attempt.getId(),
++                attempt.getExpiresAt(),
++                exam.getDurationMinutes(),
++                questionCount,
++                attempt.getScore(),
++                attempt.getCorrectCount());
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/ExamService.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ExamService.java
+index 02f5d05..482e33b 100644
+--- a/backend/exam-service/src/main/java/com/vriddhi/exam/service/ExamService.java
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ExamService.java
+@@ -6,6 +6,7 @@ import com.vriddhi.exam.dto.ExamSectionRequest;
+ import com.vriddhi.exam.dto.ExamSummaryResponse;
+ import com.vriddhi.exam.entity.Exam;
+ import com.vriddhi.exam.entity.ExamSection;
++import com.vriddhi.exam.entity.ExamKind;
+ import com.vriddhi.exam.entity.ExamStatus;
+ import com.vriddhi.exam.entity.NavigationMode;
+ import com.vriddhi.exam.exception.BadRequestException;
+@@ -87,8 +88,8 @@ public class ExamService {
+ 
+     public Page<ExamSummaryResponse> listPublished(String categoryCode, Pageable pageable) {
+         Page<Exam> page = categoryCode != null
+-                ? examRepository.findByStatusAndCategoryCode(ExamStatus.PUBLISHED, categoryCode, pageable)
+-                : examRepository.findByStatus(ExamStatus.PUBLISHED, pageable);
++                ? examRepository.findByStatusAndKindAndCategoryCode(ExamStatus.PUBLISHED, ExamKind.STANDARD, categoryCode, pageable)
++                : examRepository.findByStatusAndKind(ExamStatus.PUBLISHED, ExamKind.STANDARD, pageable);
+         return page.map(this::toSummary);
+     }
+ 
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncScheduler.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncScheduler.java
+new file mode 100644
+index 0000000..1febf02
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncScheduler.java
+@@ -0,0 +1,29 @@
++package com.vriddhi.exam.service;
++
++import com.vriddhi.exam.entity.ExamAttempt;
++import com.vriddhi.exam.repository.ExamAttemptRepository;
++import lombok.RequiredArgsConstructor;
++import org.springframework.scheduling.annotation.Scheduled;
++import org.springframework.stereotype.Component;
++
++import java.time.Instant;
++import java.time.temporal.ChronoUnit;
++
++/** Retries attempts whose results could not be delivered to progress-service (it was down, or the call timed out). */
++@Component
++@RequiredArgsConstructor
++public class ProgressSyncScheduler {
++
++    private static final long RETRY_WINDOW_HOURS = 24;
++
++    private final ExamAttemptRepository attemptRepository;
++    private final ProgressSyncService progressSyncService;
++
++    @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
++    public void retryPending() {
++        Instant since = Instant.now().minus(RETRY_WINDOW_HOURS, ChronoUnit.HOURS);
++        for (ExamAttempt attempt : attemptRepository.findByProgressSyncStatusAndSubmittedAtAfter("PENDING", since)) {
++            progressSyncService.sync(attempt.getId());
++        }
++    }
++}
+diff --git a/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncService.java b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncService.java
+new file mode 100644
+index 0000000..8aaede2
+--- /dev/null
++++ b/backend/exam-service/src/main/java/com/vriddhi/exam/service/ProgressSyncService.java
+@@ -0,0 +1,92 @@
++package com.vriddhi.exam.service;
++
++import com.vriddhi.exam.client.ProgressClient;
++import com.vriddhi.exam.entity.AnswerStatus;
++import com.vriddhi.exam.entity.AttemptAnswer;
++import com.vriddhi.exam.entity.AttemptQuestion;
++import com.vriddhi.exam.entity.AttemptQuestionOption;
++import com.vriddhi.exam.entity.AttemptStatus;
++import com.vriddhi.exam.entity.ExamAttempt;
++import com.vriddhi.exam.repository.AttemptAnswerRepository;
++import com.vriddhi.exam.repository.AttemptQuestionOptionRepository;
++import com.vriddhi.exam.repository.AttemptQuestionRepository;
++import com.vriddhi.exam.repository.ExamAttemptRepository;
++import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.stereotype.Service;
++
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Objects;
++import java.util.Set;
++import java.util.UUID;
++import java.util.stream.Collectors;
++
++/**
++ * Delivers the result of a finished attempt to progress-service so mocks feed the revision queue, topic
++ * accuracy and streak just like practice does. Only answered, auto-gradable questions are reported;
++ * skipped questions are left out so a timed-out mock does not drag accuracy down.
++ * The two services have separate databases, so this is eventually consistent: a failed call leaves the
++ * attempt PENDING and ProgressSyncScheduler retries it. progress-service ignores a repeated attemptId.
++ */
++@Slf4j
++@Service
++@RequiredArgsConstructor
++public class ProgressSyncService {
++
++    private final ExamAttemptRepository attemptRepository;
++    private final AttemptQuestionRepository attemptQuestionRepository;
++    private final AttemptQuestionOptionRepository attemptOptionRepository;
++    private final AttemptAnswerRepository attemptAnswerRepository;
++    private final ProgressClient progressClient;
++
++    public void sync(UUID attemptId) {
++        ExamAttempt attempt = attemptRepository.findById(attemptId).orElse(null);
++        if (attempt == null || attempt.getStatus() == AttemptStatus.IN_PROGRESS
++                || !"PENDING".equals(attempt.getProgressSyncStatus())) {
++            return;
++        }
++        try {
++            List<ProgressClient.ResultItem> results = collectResults(attempt);
++            if (!results.isEmpty()) {
++                progressClient.postResults(attempt.getId(), attempt.getUserId(), results);
++            }
++            attemptRepository.updateProgressSyncStatus(attempt.getId(), results.isEmpty() ? "NOT_APPLICABLE" : "DONE");
++        } catch (RuntimeException ex) {
++            log.warn("Progress sync failed for attempt {} (it stays PENDING and will be retried): {}", attemptId, ex.getMessage());
++        }
++    }
++
++    List<ProgressClient.ResultItem> collectResults(ExamAttempt attempt) {
++        List<ProgressClient.ResultItem> results = new ArrayList<>();
++        for (AttemptQuestion question : attemptQuestionRepository.findByAttemptIdOrderBySortOrder(attempt.getId())) {
++            if (question.getTopicId() == null || isManuallyGraded(question.getQuestionType())) {
++                continue;
++            }
++            AttemptAnswer answer = attemptAnswerRepository.findById(question.getId()).orElse(null);
++            if (answer == null || !(answer.getStatus() == AnswerStatus.ANSWERED || answer.getStatus() == AnswerStatus.ANSWERED_MARKED)) {
++                continue;
++            }
++            Set<UUID> correctIds = attemptOptionRepository.findByAttemptQuestionIdOrderBySortOrder(question.getId()).stream()
++                    .filter(AttemptQuestionOption::isCorrect)
++                    .map(AttemptQuestionOption::getId)
++                    .collect(Collectors.toSet());
++            Set<UUID> selectedIds = answer.getSelectedOptionIds() == null
++                    ? Set.of()
++                    : new HashSet<>(Arrays.asList(answer.getSelectedOptionIds()));
++            results.add(new ProgressClient.ResultItem(
++                    question.getQuestionId(),
++                    question.getTopicId(),
++                    Objects.requireNonNullElse(question.getTopicName(), "Topic"),
++                    Objects.requireNonNullElse(question.getSubjectName(), "Subject"),
++                    correctIds.equals(selectedIds)));
++        }
++        return results;
++    }
++
++    private boolean isManuallyGraded(String type) {
++        return "FILL_BLANK".equals(type) || "CODING".equals(type) || "SUBJECTIVE".equals(type);
++    }
++}
+diff --git a/backend/exam-service/src/main/resources/application.yml b/backend/exam-service/src/main/resources/application.yml
+index ed11973..5952a3b 100644
+--- a/backend/exam-service/src/main/resources/application.yml
++++ b/backend/exam-service/src/main/resources/application.yml
+@@ -51,3 +51,7 @@ management:
+ logging:
+   level:
+     com.vriddhi.exam: INFO
++
++# progress-service is resolved through Eureka by the @LoadBalanced WebClient (daily plan + result sync).
++progress-service:
++  base-url: ${PROGRESS_SERVICE_URL:http://progress-service}
+diff --git a/backend/exam-service/src/main/resources/db/migration/V7__daily_mock_and_progress_sync.sql b/backend/exam-service/src/main/resources/db/migration/V7__daily_mock_and_progress_sync.sql
+new file mode 100644
+index 0000000..4c9203b
+--- /dev/null
++++ b/backend/exam-service/src/main/resources/db/migration/V7__daily_mock_and_progress_sync.sql
+@@ -0,0 +1,26 @@
++-- Phase 2: a private, timed "daily mock" exam per learner per day, and syncing finished attempts to progress-service.
++
++-- A DAILY exam belongs to one learner and one calendar day. STANDARD exams are unchanged (owner/date stay NULL).
++ALTER TABLE exams
++    ADD COLUMN kind          VARCHAR(20) NOT NULL DEFAULT 'STANDARD',
++    ADD COLUMN owner_user_id UUID,
++    ADD COLUMN plan_date     DATE,
++    ADD CONSTRAINT chk_exams_kind CHECK (kind IN ('STANDARD', 'DAILY')),
++    ADD CONSTRAINT chk_exams_daily_owner CHECK (kind = 'STANDARD' OR (owner_user_id IS NOT NULL AND plan_date IS NOT NULL));
++
++-- At most one daily mock per learner, category and day (makes "start" idempotent and race-safe).
++CREATE UNIQUE INDEX uq_daily_exam_per_user_day ON exams (owner_user_id, category_code, plan_date) WHERE kind = 'DAILY';
++CREATE INDEX idx_exams_kind_status ON exams (kind, status);
++
++-- Remember each question's topic so a finished attempt can be reported to progress-service.
++-- NULL for attempts that were started before this migration (they are simply not synced).
++ALTER TABLE attempt_questions
++    ADD COLUMN topic_id     UUID,
++    ADD COLUMN topic_name   VARCHAR(150),
++    ADD COLUMN subject_name VARCHAR(150);
++
++-- NOT_APPLICABLE: nothing to report. PENDING: finished, results not yet delivered. DONE: delivered.
++ALTER TABLE exam_attempts
++    ADD COLUMN progress_sync_status VARCHAR(20) NOT NULL DEFAULT 'NOT_APPLICABLE',
++    ADD CONSTRAINT chk_attempt_progress_sync CHECK (progress_sync_status IN ('NOT_APPLICABLE', 'PENDING', 'DONE'));
++CREATE INDEX idx_attempts_sync_pending ON exam_attempts (submitted_at) WHERE progress_sync_status = 'PENDING';
+diff --git a/backend/exam-service/src/test/java/com/vriddhi/exam/service/DailyExamBlueprintTest.java b/backend/exam-service/src/test/java/com/vriddhi/exam/service/DailyExamBlueprintTest.java
+new file mode 100644
+index 0000000..0113536
+--- /dev/null
++++ b/backend/exam-service/src/test/java/com/vriddhi/exam/service/DailyExamBlueprintTest.java
+@@ -0,0 +1,103 @@
++package com.vriddhi.exam.service;
++
++import com.vriddhi.exam.dto.ContentTopicDto;
++import com.vriddhi.exam.dto.ProgressDailyPlanDto;
++import com.vriddhi.exam.service.DailyExamBlueprint.SectionSpec;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++import java.util.UUID;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++class DailyExamBlueprintTest {
++
++    private static final UUID T1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
++    private static final UUID T2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
++    private static final UUID T3 = UUID.fromString("00000000-0000-0000-0000-000000000003");
++
++    private static ProgressDailyPlanDto.Item item(String kind, UUID topic, int count, String reason) {
++        return new ProgressDailyPlanDto.Item(kind, null, topic, "Topic", "Subject", count, reason);
++    }
++
++    @Test
++    void planBecomesOneSectionPerReasonInFixedOrder() {
++        List<ProgressDailyPlanDto.Item> items = List.of(
++                item("TOPIC", T3, 2, "NEW_TOPIC"),
++                item("QUESTION", T1, 1, "DUE_FOR_REVIEW"),
++                item("QUESTION", T1, 1, "DUE_FOR_REVIEW"),
++                item("TOPIC", T2, 2, "WEAK_TOPIC"));
++
++        List<SectionSpec> sections = DailyExamBlueprint.sectionsFromPlan(items);
++
++        assertEquals(3, sections.size());
++        assertEquals("Revision", sections.get(0).name());
++        assertEquals(2, sections.get(0).questionCount());
++        assertEquals(List.of(T1), sections.get(0).topicIds()); // the same topic is listed once
++        assertEquals("Weak topics", sections.get(1).name());
++        assertEquals("New topics", sections.get(2).name());
++        assertEquals(6, DailyExamBlueprint.totalQuestions(sections));
++    }
++
++    @Test
++    void unknownReasonsAreTreatedAsMixedReviewAndEmptyItemsAreIgnored() {
++        List<SectionSpec> sections = DailyExamBlueprint.sectionsFromPlan(List.of(
++                item("TOPIC", T1, 3, "SOMETHING_NEW"),
++                item("TOPIC", T2, 0, "WEAK_TOPIC")));
++
++        assertEquals(1, sections.size());
++        assertEquals("Mixed review", sections.get(0).name());
++        assertEquals(3, sections.get(0).questionCount());
++    }
++
++    @Test
++    void emptyPlanGivesNoSections() {
++        assertTrue(DailyExamBlueprint.sectionsFromPlan(List.of()).isEmpty());
++        assertTrue(DailyExamBlueprint.sectionsFromPlan(null).isEmpty());
++    }
++
++    @Test
++    void durationIsOnePointFiveMinutesPerQuestionWithAFiveMinuteFloor() {
++        assertEquals(15, DailyExamBlueprint.durationMinutes(10));
++        assertEquals(12, DailyExamBlueprint.durationMinutes(8));
++        assertEquals(5, DailyExamBlueprint.durationMinutes(2));
++        assertEquals(5, DailyExamBlueprint.durationMinutes(0));
++        assertEquals(8, DailyExamBlueprint.durationMinutes(5));
++    }
++
++    @Test
++    void fallbackPicksTopicsOfTheRequestedCategoryOnly() {
++        List<ContentTopicDto> catalog = List.of(
++                new ContentTopicDto(T1, "A", "S", "JAVA", 9),
++                new ContentTopicDto(T2, "B", "S", "JAVA", 9),
++                new ContentTopicDto(T3, "C", "S", "OTHER", 9));
++
++        List<SectionSpec> sections = DailyExamBlueprint.fallbackSections(catalog, "JAVA", 42L);
++
++        assertEquals(1, sections.size());
++        assertEquals(4, sections.get(0).questionCount()); // 2 topics x 2 questions
++        assertEquals(2, sections.get(0).topicIds().size());
++        assertTrue(!sections.get(0).topicIds().contains(T3));
++    }
++
++    @Test
++    void fallbackNeverAsksForMoreQuestionsThanATopicHas() {
++        List<ContentTopicDto> catalog = List.of(new ContentTopicDto(T1, "A", "S", "JAVA", 1));
++
++        List<SectionSpec> sections = DailyExamBlueprint.fallbackSections(catalog, "JAVA", 1L);
++
++        assertEquals(1, DailyExamBlueprint.totalQuestions(sections));
++    }
++
++    @Test
++    void fallbackIsEmptyForAnUnknownCategoryAndStableForTheSameSeed() {
++        List<ContentTopicDto> catalog = List.of(
++                new ContentTopicDto(T1, "A", "S", "JAVA", 9),
++                new ContentTopicDto(T2, "B", "S", "JAVA", 9),
++                new ContentTopicDto(T3, "C", "S", "JAVA", 9));
++
++        assertTrue(DailyExamBlueprint.fallbackSections(catalog, "NOPE", 1L).isEmpty());
++        assertEquals(DailyExamBlueprint.fallbackSections(catalog, "JAVA", 7L), DailyExamBlueprint.fallbackSections(catalog, "JAVA", 7L));
++    }
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/config/SecurityConfig.java b/backend/progress-service/src/main/java/com/vriddhi/progress/config/SecurityConfig.java
+index 10b5314..85b11e3 100644
+--- a/backend/progress-service/src/main/java/com/vriddhi/progress/config/SecurityConfig.java
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/config/SecurityConfig.java
+@@ -26,7 +26,9 @@ public class SecurityConfig {
+                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                 .authorizeHttpRequests(auth -> auth
+                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+-                        // Every progress endpoint is per-learner: the learner id always comes from the verified JWT.
++                        // Called by exam-service only (api-gateway does not route /internal/**).
++                        .requestMatchers("/internal/**").hasAnyRole("EXAM_SERVICE", "ADMIN")
++                        // Every other progress endpoint is per-learner: the learner id always comes from the verified JWT.
+                         .anyRequest().authenticated()
+                 )
+                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/controller/InternalProgressController.java b/backend/progress-service/src/main/java/com/vriddhi/progress/controller/InternalProgressController.java
+new file mode 100644
+index 0000000..642f32a
+--- /dev/null
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/controller/InternalProgressController.java
+@@ -0,0 +1,42 @@
++package com.vriddhi.progress.controller;
++
++import com.vriddhi.progress.dto.DailyPlan;
++import com.vriddhi.progress.dto.InternalResultsRequest;
++import com.vriddhi.progress.dto.InternalResultsResponse;
++import com.vriddhi.progress.service.DailyPlanService;
++import com.vriddhi.progress.service.ProgressService;
++import jakarta.validation.Valid;
++import lombok.RequiredArgsConstructor;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.UUID;
++
++/**
++ * Service-to-service only. api-gateway does not route /internal/**, and SecurityConfig requires the
++ * EXAM_SERVICE (or ADMIN) role. Unlike /api/progress, the learner id comes from the request here because
++ * the caller is a trusted service acting for a learner.
++ */
++@RestController
++@RequestMapping("/internal")
++@RequiredArgsConstructor
++public class InternalProgressController {
++
++    private final ProgressService progressService;
++    private final DailyPlanService dailyPlanService;
++
++    @GetMapping("/daily-plan")
++    public DailyPlan dailyPlan(@RequestParam UUID userId, @RequestParam(required = false) String category) {
++        return dailyPlanService.plan(userId, category);
++    }
++
++    @PostMapping("/results")
++    public InternalResultsResponse results(@Valid @RequestBody InternalResultsRequest request) {
++        boolean applied = progressService.recordAttempt(request.attemptId(), request.userId(), request.results());
++        return new InternalResultsResponse(applied);
++    }
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsRequest.java b/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsRequest.java
+new file mode 100644
+index 0000000..c94efa9
+--- /dev/null
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsRequest.java
+@@ -0,0 +1,16 @@
++package com.vriddhi.progress.dto;
++
++import jakarta.validation.Valid;
++import jakarta.validation.constraints.NotEmpty;
++import jakarta.validation.constraints.NotNull;
++
++import java.util.List;
++import java.util.UUID;
++
++/** Sent by exam-service when an attempt finishes. attemptId makes the call idempotent. */
++public record InternalResultsRequest(
++        @NotNull UUID attemptId,
++        @NotNull UUID userId,
++        @NotEmpty List<@Valid RecordResultRequest> results
++) {
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsResponse.java b/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsResponse.java
+new file mode 100644
+index 0000000..f723feb
+--- /dev/null
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/dto/InternalResultsResponse.java
+@@ -0,0 +1,5 @@
++package com.vriddhi.progress.dto;
++
++/** applied=false means this attempt had already been counted (a harmless retry). */
++public record InternalResultsResponse(boolean applied) {
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/entity/ProcessedAttempt.java b/backend/progress-service/src/main/java/com/vriddhi/progress/entity/ProcessedAttempt.java
+new file mode 100644
+index 0000000..28deed3
+--- /dev/null
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/entity/ProcessedAttempt.java
+@@ -0,0 +1,32 @@
++package com.vriddhi.progress.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++
++import java.time.Instant;
++import java.util.UUID;
++
++/** An exam-service attempt whose results have already been applied. */
++@Entity
++@Table(name = "processed_attempts")
++@Getter
++@Setter
++@NoArgsConstructor
++public class ProcessedAttempt {
++
++    @Id
++    @Column(name = "attempt_id")
++    private UUID attemptId;
++
++    @Column(name = "processed_at", nullable = false)
++    private Instant processedAt = Instant.now();
++
++    public ProcessedAttempt(UUID attemptId) {
++        this.attemptId = attemptId;
++    }
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/repository/ProcessedAttemptRepository.java b/backend/progress-service/src/main/java/com/vriddhi/progress/repository/ProcessedAttemptRepository.java
+new file mode 100644
+index 0000000..5f0530f
+--- /dev/null
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/repository/ProcessedAttemptRepository.java
+@@ -0,0 +1,9 @@
++package com.vriddhi.progress.repository;
++
++import com.vriddhi.progress.entity.ProcessedAttempt;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.UUID;
++
++public interface ProcessedAttemptRepository extends JpaRepository<ProcessedAttempt, UUID> {
++}
+diff --git a/backend/progress-service/src/main/java/com/vriddhi/progress/service/ProgressService.java b/backend/progress-service/src/main/java/com/vriddhi/progress/service/ProgressService.java
+index 21acb3b..7dc3d67 100644
+--- a/backend/progress-service/src/main/java/com/vriddhi/progress/service/ProgressService.java
++++ b/backend/progress-service/src/main/java/com/vriddhi/progress/service/ProgressService.java
+@@ -4,9 +4,11 @@ import com.vriddhi.progress.dto.ProgressSummary;
+ import com.vriddhi.progress.dto.RecordResultRequest;
+ import com.vriddhi.progress.dto.TopicProgress;
+ import com.vriddhi.progress.entity.PracticeResult;
++import com.vriddhi.progress.entity.ProcessedAttempt;
+ import com.vriddhi.progress.entity.ReviewState;
+ import com.vriddhi.progress.entity.TopicStat;
+ import com.vriddhi.progress.repository.PracticeResultRepository;
++import com.vriddhi.progress.repository.ProcessedAttemptRepository;
+ import com.vriddhi.progress.repository.ReviewStateRepository;
+ import com.vriddhi.progress.repository.TopicStatRepository;
+ import lombok.RequiredArgsConstructor;
+@@ -29,6 +31,7 @@ public class ProgressService {
+     private final PracticeResultRepository results;
+     private final TopicStatRepository topicStats;
+     private final ReviewStateRepository reviewStates;
++    private final ProcessedAttemptRepository processedAttempts;
+ 
+     /** Records one answered question: appends the result, updates the topic stats and moves the Leitner box. */
+     @Transactional
+@@ -78,6 +81,22 @@ public class ProgressService {
+         reviewStates.save(state);
+     }
+ 
++    /**
++     * Applies the answered questions of one finished exam attempt. Returns false (and changes nothing) if this
++     * attempt was already applied, so exam-service can safely retry a delivery it was not sure about.
++     */
++    @Transactional
++    public boolean recordAttempt(UUID attemptId, UUID userId, List<RecordResultRequest> results) {
++        if (processedAttempts.existsById(attemptId)) {
++            return false;
++        }
++        processedAttempts.save(new ProcessedAttempt(attemptId));
++        for (RecordResultRequest result : results) {
++            record(userId, result);
++        }
++        return true;
++    }
++
+     @Transactional(readOnly = true)
+     public ProgressSummary summary(UUID userId) {
+         Instant now = Instant.now();
+diff --git a/backend/progress-service/src/main/resources/db/migration/V2__processed_attempts.sql b/backend/progress-service/src/main/resources/db/migration/V2__processed_attempts.sql
+new file mode 100644
+index 0000000..a421c2c
+--- /dev/null
++++ b/backend/progress-service/src/main/resources/db/migration/V2__processed_attempts.sql
+@@ -0,0 +1,5 @@
++-- Exam attempts reported by exam-service are applied at most once: the attempt id is the idempotency key.
++CREATE TABLE processed_attempts (
++    attempt_id    UUID PRIMARY KEY,
++    processed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
++);
+diff --git a/docker-compose.prod.yml b/docker-compose.prod.yml
+index 7faeba2..1243db5 100644
+--- a/docker-compose.prod.yml
++++ b/docker-compose.prod.yml
+@@ -88,6 +88,7 @@ services:
+       <<: [*java-env, *db-env]
+       DB_NAME: vriddhi_exam
+       SERVER_PORT: 8083
++      PROGRESS_SERVICE_URL: http://progress-service
+       CONTENT_SERVICE_URL: http://content-service
+ 
+   learning-service:
+diff --git a/docker-compose.yml b/docker-compose.yml
+index d30b672..c872737 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -115,6 +115,8 @@ services:
+       JWT_SECRET: *jwt-secret
+       SERVER_PORT: 8083
+       EUREKA_URL: http://discovery-server:8761/eureka/
++      # Daily mock plan + result sync. The mock falls back to a random mix if progress-service is down.
++      PROGRESS_SERVICE_URL: http://progress-service
+       # No longer a host:port — content-service.base-url is the Eureka
+       # service id, resolved by the @LoadBalanced WebClient at runtime.
+       CONTENT_SERVICE_URL: http://content-service
+diff --git a/frontend/src/api/dailyMock.ts b/frontend/src/api/dailyMock.ts
+new file mode 100644
+index 0000000..b7adf96
+--- /dev/null
++++ b/frontend/src/api/dailyMock.ts
+@@ -0,0 +1,25 @@
++import { apiClient } from './client'
++
++export type DailyMockState = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'
++
++export interface DailyMockStatus {
++  state: DailyMockState
++  examId: string | null
++  attemptId: string | null
++  expiresAt: string | null
++  durationMinutes: number | null
++  totalQuestions: number | null
++  score: number | null
++  correctCount: number | null
++}
++
++/** Starts today's timed mock, or resumes / reports the one that already exists (one per learner, category and day). */
++export async function startDailyMock(category: string): Promise<DailyMockStatus> {
++  const { data } = await apiClient.post<DailyMockStatus>('/attempts/daily', null, { params: { category } })
++  return data
++}
++
++export async function fetchDailyMockToday(category: string): Promise<DailyMockStatus> {
++  const { data } = await apiClient.get<DailyMockStatus>('/attempts/daily/today', { params: { category } })
++  return data
++}
+diff --git a/frontend/src/components/TimedMockCard.tsx b/frontend/src/components/TimedMockCard.tsx
+new file mode 100644
+index 0000000..7539913
+--- /dev/null
++++ b/frontend/src/components/TimedMockCard.tsx
+@@ -0,0 +1,86 @@
++import { useEffect, useState } from 'react'
++import { useNavigate } from 'react-router-dom'
++import { fetchDailyMockToday, startDailyMock, type DailyMockStatus } from '../api/dailyMock'
++
++interface Props {
++  categoryCode: string
++}
++
++function minutesLeft(expiresAt: string | null): number {
++  if (!expiresAt) return 0
++  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 60000))
++}
++
++/**
++ * Today's timed mock. Starting it creates a private exam for today and opens the normal exam screen, so the
++ * server owns the clock: closing the tab does not pause it, and it is auto-submitted when time runs out.
++ */
++export function TimedMockCard({ categoryCode }: Props) {
++  const navigate = useNavigate()
++  const [status, setStatus] = useState<DailyMockStatus | null>(null)
++  const [busy, setBusy] = useState(false)
++  const [error, setError] = useState<string | null>(null)
++
++  useEffect(() => {
++    let cancelled = false
++    setStatus(null)
++    setError(null)
++    fetchDailyMockToday(categoryCode)
++      .then((s) => { if (!cancelled) setStatus(s) })
++      .catch(() => { if (!cancelled) setError('Could not check today\'s mock.') })
++    return () => { cancelled = true }
++  }, [categoryCode])
++
++  async function handleStart() {
++    setBusy(true)
++    setError(null)
++    try {
++      const started = await startDailyMock(categoryCode)
++      if (started.attemptId) {
++        navigate(started.state === 'COMPLETED' ? `/attempts/${started.attemptId}/result` : `/attempts/${started.attemptId}`)
++      }
++    } catch {
++      setError('Could not start today\'s mock. Please try again in a moment.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  const running = status?.state === 'IN_PROGRESS'
++  const done = status?.state === 'COMPLETED'
++
++  return (
++    <div className="mb-6 rounded border border-line bg-bg-raised p-6">
++      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
++        <h2 className="font-serif text-lg font-semibold">Today's timed mock</h2>
++        {running && (
++          <span className="rounded-full bg-amber-soft px-2.5 py-1 text-xs font-semibold text-amber">
++            In progress · about {minutesLeft(status?.expiresAt ?? null)} min left
++          </span>
++        )}
++        {done && (
++          <span className="rounded-full bg-green-soft px-2.5 py-1 text-xs font-semibold text-green">Completed</span>
++        )}
++      </div>
++
++      <p className="mb-4 text-sm text-ink-soft">
++        {done
++          ? 'You have taken today\'s mock. A new one is built tomorrow from your revision queue and weak topics.'
++          : 'Ten questions picked for you, on a server-side clock (1.5 minutes per question). It is submitted automatically when time is up.'}
++      </p>
++
++      {error && <p className="mb-3 rounded bg-red-soft px-3 py-2 text-sm text-red">{error}</p>}
++      {!status && !error && <p className="text-sm text-ink-soft">Checking…</p>}
++
++      {status && (
++        <button
++          onClick={handleStart}
++          disabled={busy}
++          className="rounded bg-ink px-5 py-2.5 text-sm font-semibold text-bg disabled:opacity-50"
++        >
++          {busy ? 'Please wait…' : done ? 'View result' : running ? 'Resume mock' : 'Start timed mock'}
++        </button>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/Daily.tsx b/frontend/src/pages/Daily.tsx
+index 324094e..ba8694f 100644
+--- a/frontend/src/pages/Daily.tsx
++++ b/frontend/src/pages/Daily.tsx
+@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
+ import { useSearchParams } from 'react-router-dom'
+ import { Layout } from '../components/Layout'
+ import { PracticeSession } from '../components/PracticeSession'
++import { TimedMockCard } from '../components/TimedMockCard'
+ import { fetchCategories, fetchPracticeQuestion, fetchRandomQuestions, type CategoryResponse } from '../api/catalog'
+ import { fetchDailyPlan, type DailyPlan, type DailyPlanReason } from '../api/progress'
+ import type { QuestionResponse } from '../api/types'
+@@ -89,7 +90,7 @@ function DailyPractice() {
+         <div>
+           <h1 className="font-serif text-2xl font-semibold">Daily practice</h1>
+           <p className="mt-1 text-sm text-ink-soft">
+-            Today's set mixes questions due for revision, your weaker topics and topics you have not tried yet.
++            Take the timed mock below, or warm up with the untimed set. Both mix questions due for revision, your weaker topics and topics you have not tried yet.
+           </p>
+         </div>
+         {categories.length > 1 && !started && (
+@@ -103,6 +104,8 @@ function DailyPractice() {
+         )}
+       </div>
+ 
++      {categoryCode && !started && <TimedMockCard categoryCode={categoryCode} />}
++
+       {error && <p className="mb-4 rounded bg-red-soft px-4 py-3 text-sm text-red">{error}</p>}
+       {!plan && !error && <p className="text-sm text-ink-soft">Building today's plan…</p>}
+ 
+diff --git a/frontend/src/pages/Dashboard.tsx b/frontend/src/pages/Dashboard.tsx
+index 9a829d7..e3aa187 100644
+--- a/frontend/src/pages/Dashboard.tsx
++++ b/frontend/src/pages/Dashboard.tsx
+@@ -1,6 +1,7 @@
+ import { Link } from 'react-router-dom'
+ import { Layout } from '../components/Layout'
+ import { useAuth } from '../context/AuthContext'
++import { TimedMockCard } from '../components/TimedMockCard'
+ 
+ // Illustrative only — there's no progress-tracking service yet, so these
+ // numbers aren't wired to real attempt/practice history. Swap this section
+@@ -44,6 +45,8 @@ export function DashboardPage() {
+         ))}
+       </div>
+ 
++      <TimedMockCard categoryCode="JAVA_INTERVIEW" />
++
+       <div className="mb-6 rounded border border-line bg-bg-raised p-6">
+         <h2 className="mb-4 font-serif text-lg font-semibold">Subject progress</h2>
+         {SUBJECT_PROGRESS.map((s) => (
+diff --git a/infra/tools/verify_sql.py b/infra/tools/verify_sql.py
+index 8c830ba..590a06a 100644
+--- a/infra/tools/verify_sql.py
++++ b/infra/tools/verify_sql.py
+@@ -101,9 +101,9 @@ ex = results[('exam-service', 'ATTEMPT_TOTALS')][0]
+ check(ex[:4] == (4, 1, 2, 1), f"attempt totals total/in-progress/submitted/auto = {ex[:4]}")
+ check(abs(float(ex[4]) - 8.3333) < 0.01, f"avg score ignores in-progress attempts = {float(ex[4]):.2f}")
+ check(results[('exam-service', 'PUBLIC_COUNTS')][0][1] == 3, "public attempts_taken excludes in-progress")
+-check(len(results[('exam-service', 'PUBLIC_EXAMS')]) == 7, "public exam list shows the 7 seeded papers (3 TCS NQT + 3 UGC NET practice + UGC NET June 2025)")
++check(len(results[('exam-service', 'PUBLIC_EXAMS')]) == 10, "public exam list shows the 10 seeded papers (3 TCS NQT + 3 UGC NET practice + UGC NET June 2025 + 3 Java Interview Prep mocks)")
+ check(sum(1 for r in results[('exam-service', 'ADMIN_EXAMS')] if r[9] > 0) == 1, "admin exam list carries per-exam attempt counts")
+-check(results[('content-service', 'PUBLIC_COUNTS')][0][0] == 166, "public content stats: 166 published questions (32 TCS NQT + 39 UGC NET practice + 95 June 2025)")
++check(results[('content-service', 'PUBLIC_COUNTS')][0][0] == 274, "public content stats: 274 published questions (32 TCS NQT + 39 UGC NET practice + 95 June 2025 + 108 Java Interview Prep)")
+ 
+ print()
+ sys.exit(1 if failures else 0) if failures else print("All SQL statements run and behave correctly against PostgreSQL.")
