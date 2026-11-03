@@ -1,0 +1,1878 @@
+{
+ "category": {
+  "code": "JAVA_INTERVIEW",
+  "name": "Java Interview Prep",
+  "description": "Java 8 to 21 interview preparation: concepts, output-prediction questions and mock tests"
+ },
+ "subjects": [
+  {
+   "name": "Java 8 Essentials",
+   "description": "Lambdas, streams, collectors, Optional, default methods and java.time",
+   "topics": [
+    {
+     "name": "Lambda & Functional Interfaces",
+     "description": "Lambdas, functional interfaces, comparators",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What makes an interface a functional interface?",
+       "options": [
+        "It must be annotated with @FunctionalInterface",
+        "It has no methods at all",
+        "It contains only default methods",
+        "It has exactly one abstract method"
+       ],
+       "answer": 3,
+       "why": "A functional interface has exactly one abstract method; default and static methods do not count. @FunctionalInterface is optional: it only makes the compiler enforce the rule.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "Which built-in functional interface converts a value of type T into a value of type R?",
+       "options": [
+        "Predicate<T>",
+        "Consumer<T>",
+        "Function<T, R>",
+        "Supplier<T>"
+       ],
+       "answer": 2,
+       "why": "Function<T, R> has apply(T) returning R. Predicate returns boolean, Consumer returns nothing, Supplier takes no input.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What does Predicate<T>.test(t) return?",
+       "options": [
+        "void",
+        "Optional<T>",
+        "T",
+        "boolean"
+       ],
+       "answer": 3,
+       "why": "A Predicate is a yes/no test, so test() returns a primitive boolean. It is what filter() expects.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Inside a lambda expression, what does `this` refer to?",
+       "options": [
+        "The thread that runs the lambda",
+        "The enclosing class instance",
+        "The functional interface type",
+        "The lambda object itself"
+       ],
+       "answer": 1,
+       "why": "A lambda does not introduce a new scope for this. In an anonymous class, this is the anonymous object, which is a key difference.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What happens when this code is compiled?",
+       "options": [
+        "Compile error: a local variable used in a lambda must be final or effectively final",
+        "It compiles and count stays 0",
+        "It compiles but throws an exception at runtime",
+        "count ends up equal to list.size()"
+       ],
+       "answer": 0,
+       "why": "Lambdas capture a copy of local variables, so they must never be reassigned. Use an array, an AtomicInteger, or a stream operation such as count() instead.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "int count = 0;\nlist.forEach(x -> count++);"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which comparator sorts employees by salary descending and breaks ties by name ascending?",
+       "options": [
+        "Comparator.comparingDouble(Employee::getSalary).reversed().thenComparing(Employee::getName)",
+        "Comparator.comparing(Employee::getName).thenComparing(Employee::getSalary)",
+        "Comparator.naturalOrder()",
+        "Comparator.comparingDouble(Employee::getSalary).thenComparing(Employee::getName).reversed()"
+       ],
+       "answer": 0,
+       "why": "reversed() applies to the comparator built so far (salary), then thenComparing adds the name tie-break. Putting reversed() last would reverse the name order too.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which statement about @FunctionalInterface is correct?",
+       "options": [
+        "It is required for a lambda to be assigned to the interface",
+        "It forbids default methods",
+        "It is optional; it makes the compiler reject the interface if it gets a second abstract method",
+        "It makes the interface thread-safe"
+       ],
+       "answer": 2,
+       "why": "Any interface with one abstract method can be the target of a lambda. The annotation just documents the intent and adds a compile-time check.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Comparator declares equals(Object) as an abstract method, yet it is a functional interface. Why?",
+       "options": [
+        "equals is a default method in Comparator",
+        "The compiler ignores the first abstract method",
+        "Methods that match public methods of Object do not count as abstract methods for this purpose",
+        "Comparator is a class, not an interface"
+       ],
+       "answer": 2,
+       "why": "Every class already inherits equals from Object, so an interface redeclaring it does not add a method an implementer must write.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How are lambdas compiled compared with anonymous classes?",
+       "options": [
+        "Each lambda generates its own .class file, like an anonymous class",
+        "Lambdas are converted to inner enums at compile time",
+        "Lambdas use invokedynamic and do not produce a separate .class file for each lambda",
+        "Lambdas are only evaluated at class-loading time"
+       ],
+       "answer": 2,
+       "why": "The compiler emits an invokedynamic call and the JVM creates the implementation at runtime, which avoids a class file per lambda.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Stream Basics",
+     "description": "Stream pipelines, terminal and intermediate operations",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "Which of these is a terminal stream operation?",
+       "options": [
+        "count()",
+        "sorted()",
+        "filter()",
+        "map()"
+       ],
+       "answer": 0,
+       "why": "Terminal operations such as count(), collect(), forEach() and findFirst() start the pipeline. filter, map and sorted are intermediate and lazy.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What happens if you call a terminal operation on a stream that has already been consumed?",
+       "options": [
+        "An empty result is returned",
+        "The stream restarts from the beginning",
+        "NullPointerException is thrown",
+        "IllegalStateException is thrown"
+       ],
+       "answer": 3,
+       "why": "A stream can be traversed only once. Create a new stream from the source if you need another pass.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does this code print?",
+       "options": [
+        "Nothing, because there is no terminal operation",
+        "Lowercase a, b, c on separate lines",
+        "It throws IllegalStateException",
+        "Uppercase A, B, C on separate lines"
+       ],
+       "answer": 0,
+       "why": "Intermediate operations are lazy. Without a terminal operation the pipeline never runs, so peek() prints nothing.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(\"a\", \"b\", \"c\")\n    .peek(System.out::println)\n    .map(String::toUpperCase);"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does this expression return?",
+       "options": [
+        "Optional[4]",
+        "4",
+        "Optional[56]",
+        "Optional[2]"
+       ],
+       "answer": 0,
+       "why": "Elements flow one at a time: 1 fails the filter, 2 passes and becomes 4, and findFirst() stops the whole pipeline. The result is wrapped in an Optional.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(1, 2, 3, 4, 5, 6)\n    .filter(n -> n % 2 == 0)\n    .map(n -> n * n)\n    .findFirst()"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which pipeline returns the second-highest distinct salary?",
+       "options": [
+        "salaries.stream().max(Comparator.naturalOrder())",
+        "salaries.stream().sorted(Comparator.reverseOrder()).skip(1).findFirst()",
+        "salaries.stream().sorted().skip(1).findFirst()",
+        "salaries.stream().distinct().sorted(Comparator.reverseOrder()).skip(1).findFirst()"
+       ],
+       "answer": 3,
+       "why": "distinct() must come first. Without it, a duplicated top salary would be returned as the \"second highest\".",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does allMatch(...) return on an empty stream?",
+       "options": [
+        "false",
+        "true",
+        "An empty Optional",
+        "It throws NoSuchElementException"
+       ],
+       "answer": 1,
+       "why": "allMatch is vacuously true when there is no element to violate the predicate. anyMatch is false and noneMatch is true on an empty stream.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is n?",
+       "options": [
+        "0",
+        "1",
+        "The code does not compile",
+        "3"
+       ],
+       "answer": 1,
+       "why": "Stream.of(int[]) treats the whole array as a single element (a Stream<int[]>). Use Arrays.stream(arr) or IntStream.of(arr) to stream the numbers.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "int[] arr = {1, 2, 3};\nlong n = Stream.of(arr).count();"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does IntStream.range(1, 5).sum() return?",
+       "options": [
+        "5",
+        "14",
+        "15",
+        "10"
+       ],
+       "answer": 3,
+       "why": "range excludes the end value, so it sums 1 + 2 + 3 + 4 = 10. rangeClosed(1, 5) would give 15.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What is the return type of Stream.count()?",
+       "options": [
+        "long",
+        "int",
+        "Integer",
+        "Optional<Long>"
+       ],
+       "answer": 0,
+       "why": "count() returns a primitive long, so compare with 3L or cast when you need an int.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Collectors",
+     "description": "groupingBy, partitioningBy, toMap, summarizing and more",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What is the type of emps.stream().collect(Collectors.groupingBy(Employee::getDept, Collectors.counting()))?",
+       "options": [
+        "Map<Employee, Long>",
+        "Map<String, Integer>",
+        "Map<String, Long>",
+        "Map<String, List<Employee>>"
+       ],
+       "answer": 2,
+       "why": "groupingBy keys by the classifier result (the department name) and counting() produces a Long per group.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "How does Collectors.partitioningBy differ from groupingBy?",
+       "options": [
+        "It sorts the elements before grouping",
+        "It always produces exactly two groups, keyed true and false",
+        "It returns a Set instead of a Map",
+        "It can only be used on numeric streams"
+       ],
+       "answer": 1,
+       "why": "partitioningBy takes a predicate and the resulting map always has both a true and a false key, even if one group is empty.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What happens when Collectors.toMap(keyFn, valueFn) meets a duplicate key?",
+       "options": [
+        "IllegalStateException is thrown unless a merge function is supplied",
+        "The last value silently wins",
+        "The first value silently wins",
+        "The entry is dropped"
+       ],
+       "answer": 0,
+       "why": "Use the three-argument form, for example toMap(k, v, Integer::sum), to say how duplicates are combined.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which collector returns count, sum, min, average and max in a single pass?",
+       "options": [
+        "Collectors.summarizingInt (or summarizingDouble)",
+        "Collectors.reducing",
+        "Collectors.counting",
+        "Collectors.joining"
+       ],
+       "answer": 0,
+       "why": "summarizingInt/Long/Double return an IntSummaryStatistics-style object with getCount, getSum, getMin, getAverage and getMax.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How do you make groupingBy return its keys in sorted order?",
+       "options": [
+        "groupingBy always returns a sorted map",
+        "Pass TreeMap::new as the map factory: groupingBy(f, TreeMap::new, downstream)",
+        "Call sorted() before collect()",
+        "Use Collectors.toSortedMap()"
+       ],
+       "answer": 1,
+       "why": "The default result is a HashMap with no ordering guarantee. The three-argument groupingBy lets you choose TreeMap or LinkedHashMap.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is the result type of Collectors.counting()?",
+       "options": [
+        "int",
+        "Integer",
+        "Long",
+        "Optional<Long>"
+       ],
+       "answer": 2,
+       "why": "counting() produces a Long. That is why comparisons such as entry.getValue() > 1 work but equals(1) would not match a Long.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "What happens if a value is null in Collectors.toMap(...)?",
+       "options": [
+        "IllegalStateException is thrown",
+        "The entry is stored with a null value",
+        "NullPointerException is thrown",
+        "The entry is skipped"
+       ],
+       "answer": 2,
+       "why": "toMap is built on HashMap.merge, which rejects null values. Filter nulls first or use a different collector.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "What does Collectors.teeing (Java 12) do?",
+       "options": [
+        "Splits a stream into two streams",
+        "Runs two collectors over the same stream in one pass and merges their results",
+        "Collects into two lists without merging",
+        "Runs the pipeline on two threads"
+       ],
+       "answer": 1,
+       "why": "For example teeing(minBy, maxBy, (min, max) -> ...) computes both in a single traversal.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which statement about reduce and collect is correct?",
+       "options": [
+        "reduce combines elements into an immutable value; collect accumulates into a mutable container",
+        "collect is only for parallel streams",
+        "They are identical",
+        "reduce always returns a List"
+       ],
+       "answer": 0,
+       "why": "reduce is immutable reduction (for example summing). collect is mutable reduction (filling a list, map or StringBuilder).",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "flatMap & Laziness",
+     "description": "flatMap, distinct, skip, limit and evaluation order",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What is the difference between map and flatMap on a Stream?",
+       "options": [
+        "flatMap is the lazy version of map",
+        "map works on collections and flatMap works on arrays",
+        "map is one-to-one; flatMap maps each element to a stream and flattens the results",
+        "flatMap always returns a List"
+       ],
+       "answer": 2,
+       "why": "Use flatMap when each element produces zero or more results, such as the words in a sentence.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "If nested is a List<List<Integer>>, what is the type of nested.stream().flatMap(List::stream)?",
+       "options": [
+        "Stream<List<Integer>>",
+        "Stream<Stream<Integer>>",
+        "List<Integer>",
+        "Stream<Integer>"
+       ],
+       "answer": 3,
+       "why": "flatMap replaces each inner list with its elements and concatenates them into one Stream<Integer>.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is printed by this pipeline (no sorted)?",
+       "options": [
+        "fa pa fb pb",
+        "pa pb fA fB",
+        "pa fA pb fB",
+        "fA fB pa pb"
+       ],
+       "answer": 2,
+       "why": "Elements travel through the whole pipeline one at a time, so the peek and forEach outputs interleave.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(\"a\", \"b\")\n    .peek(s -> System.out.print(\"p\" + s + \" \"))\n    .map(String::toUpperCase)\n    .forEach(s -> System.out.print(\"f\" + s + \" \"));"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is printed by this pipeline (with sorted)?",
+       "options": [
+        "pb pa fa fb",
+        "pb fb pa fa",
+        "pa pb fa fb",
+        "fa fb pb pa"
+       ],
+       "answer": 0,
+       "why": "sorted() is a stateful barrier: it must see every element before emitting the first one, so all peek output comes first.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(\"b\", \"a\")\n    .peek(s -> System.out.print(\"p\" + s + \" \"))\n    .sorted()\n    .forEach(s -> System.out.print(\"f\" + s + \" \"));"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does IntStream.rangeClosed(1, 10).skip(3).limit(3) produce?",
+       "options": [
+        "1, 2, 3",
+        "4, 5, 6",
+        "4, 5, 6, 7",
+        "3, 4, 5"
+       ],
+       "answer": 1,
+       "why": "skip(3) drops 1, 2, 3 and limit(3) keeps the next three values. This is the pagination pattern: skip((page - 1) * size).limit(size).",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which two stream operations are stateful?",
+       "options": [
+        "peek and forEach",
+        "limit and findFirst",
+        "filter and map",
+        "sorted and distinct"
+       ],
+       "answer": 3,
+       "why": "Stateful operations may need to remember or buffer elements. filter and map handle each element independently.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How do you find the third-highest DISTINCT number in a List<Integer>?",
+       "options": [
+        "nums.stream().distinct().sorted().limit(3)",
+        "nums.stream().distinct().sorted(Comparator.reverseOrder()).skip(2).findFirst()",
+        "nums.stream().max(Comparator.naturalOrder()).skip(2)",
+        "nums.stream().sorted().skip(2).findFirst()"
+       ],
+       "answer": 1,
+       "why": "Deduplicate, sort descending, skip the top two and take the next. The result is an Optional because the list may have fewer than three distinct values.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Why is the (long) cast used in skip((long) (page - 1) * size)?",
+       "options": [
+        "Because skip only accepts negative numbers",
+        "To make the stream parallel",
+        "To avoid int overflow when the page offset is large",
+        "Because limit requires a long start index"
+       ],
+       "answer": 2,
+       "why": "skip() takes a long. Multiplying two ints first could overflow before the value is widened, so cast one operand to long.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "String & Character Streams",
+     "description": "chars(), frequency maps, palindromes, anagrams",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What does \"abc\".chars() return?",
+       "options": [
+        "A char[]",
+        "An IntStream of char values",
+        "A Stream<Character>",
+        "A Stream<String>"
+       ],
+       "answer": 1,
+       "why": "chars() returns an IntStream. Convert with mapToObj(c -> (char) c) when you need Character objects.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "Why use a LinkedHashMap when finding the first non-repeating character with streams?",
+       "options": [
+        "It sorts keys alphabetically",
+        "It makes counting faster",
+        "It keeps first-seen order so the first entry with count 1 is the answer",
+        "HashMap cannot store Character keys"
+       ],
+       "answer": 2,
+       "why": "A HashMap has no ordering guarantee. LinkedHashMap preserves the order characters first appeared.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is n when counting the letter s in \"swiss\"?",
+       "options": [
+        "2",
+        "5",
+        "1",
+        "3"
+       ],
+       "answer": 3,
+       "why": "chars() yields the code units of \"swiss\"; the letter s appears three times (s, w, i, s, s) and count() returns 3.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "long n = \"swiss\".chars().filter(c -> c == 's').count();"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is n when \"a  b\" (two spaces) is split on a single space?",
+       "options": [
+        "3",
+        "1",
+        "2",
+        "4"
+       ],
+       "answer": 0,
+       "why": "split(\" \") on a string with two consecutive spaces produces an empty string between them: [\"a\", \"\", \"b\"]. Use split(\"\\\\s+\") to avoid that.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "long n = Arrays.stream(\"a  b\".split(\" \")).count();"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How can you check whether two strings are anagrams using streams?",
+       "options": [
+        "Use distinct() on both and compare the sizes",
+        "Compare their lengths only",
+        "Compare their hash codes",
+        "Sort the characters of both strings and compare the results"
+       ],
+       "answer": 3,
+       "why": "Anagrams have identical sorted character sequences: Arrays.equals(a.chars().sorted().toArray(), b.chars().sorted().toArray()).",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which characters of \"programming\" appear more than once?",
+       "options": [
+        "m, i, n",
+        "r, o, g",
+        "p, o, a",
+        "g, m, r"
+       ],
+       "answer": 3,
+       "why": "In p-r-o-g-r-a-m-m-i-n-g the letters r, g and m each occur twice.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which method correctly streams code points, including emoji outside the Basic Multilingual Plane?",
+       "options": [
+        "String.chars()",
+        "String.toCharArray()",
+        "String.codePoints()",
+        "String.getBytes()"
+       ],
+       "answer": 2,
+       "why": "chars() returns UTF-16 code units, so a supplementary character appears as two surrogate halves. codePoints() returns whole characters.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Why should you compare two Long objects, such as map values, with equals instead of ==?",
+       "options": [
+        "equals is faster",
+        "== compares references, and Long values outside the small cache range are different objects",
+        "== compares only the low 8 bits",
+        "== is not allowed for wrapper types"
+       ],
+       "answer": 1,
+       "why": "Long.valueOf caches -128 to 127, so 100L == 100L can be true while 1000L == 1000L is false. A comparison like value == 1 against an int literal unboxes and is fine.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Optional & Method References",
+     "description": "Optional API and the four kinds of method reference",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What does Optional.of(null) do?",
+       "options": [
+        "Returns null",
+        "Throws NullPointerException",
+        "Returns an empty Optional",
+        "Returns Optional[null]"
+       ],
+       "answer": 1,
+       "why": "of() requires a non-null value. Use ofNullable() when the value may be null.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What does Optional.ofNullable(null) return?",
+       "options": [
+        "NullPointerException",
+        "Optional[null]",
+        "An empty Optional",
+        "null"
+       ],
+       "answer": 2,
+       "why": "ofNullable wraps a value that may be null: null becomes Optional.empty().",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is the difference between orElse(x) and orElseGet(supplier)?",
+       "options": [
+        "orElse is lazy; orElseGet is eager",
+        "orElse always evaluates its argument; orElseGet calls the supplier only when the Optional is empty",
+        "orElseGet throws if the Optional is present",
+        "They are identical"
+       ],
+       "answer": 1,
+       "why": "orElse(expensive()) runs expensive() even when a value is present. orElseGet(() -> expensive()) skips it.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "user.getEmail() returns Optional<String>. Which call gives an Optional<String> without nesting?",
+       "options": [
+        "Optional.of(user).filter(User::getEmail)",
+        "Optional.of(user).map(User::getEmail)",
+        "Optional.of(user).orElse(User::getEmail)",
+        "Optional.of(user).flatMap(User::getEmail)"
+       ],
+       "answer": 3,
+       "why": "map would produce Optional<Optional<String>>. flatMap is for functions that already return an Optional.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What kind of method reference is String::toUpperCase?",
+       "options": [
+        "Static method reference",
+        "Unbound instance method reference",
+        "Constructor reference",
+        "Bound instance method reference"
+       ],
+       "answer": 1,
+       "why": "The receiver is supplied later as the first argument: s -> s.toUpperCase().",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What kind of method reference is System.out::println?",
+       "options": [
+        "Unbound instance method reference",
+        "Static method reference",
+        "Bound instance method reference",
+        "Constructor reference"
+       ],
+       "answer": 2,
+       "why": "The receiver (System.out) is fixed when the reference is created: x -> System.out.println(x).",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What kind of method reference is User::new?",
+       "options": [
+        "Bound instance method reference",
+        "Unbound instance method reference",
+        "Constructor reference",
+        "Static method reference"
+       ],
+       "answer": 2,
+       "why": "User::new calls a constructor, for example name -> new User(name). ArrayList::new and String[]::new work the same way.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Why is Optional a poor choice for a class field or method parameter?",
+       "options": [
+        "It only works with primitive types",
+        "It is not allowed by the compiler",
+        "It adds allocation and noise, is not Serializable, and does not stop callers passing null for the Optional itself",
+        "It makes the class immutable"
+       ],
+       "answer": 2,
+       "why": "Optional is designed for return types that may have no value. For fields and parameters, plain nullable values or overloads are clearer.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What does calling get() on an empty Optional throw?",
+       "options": [
+        "IllegalArgumentException",
+        "IllegalStateException",
+        "NullPointerException",
+        "NoSuchElementException"
+       ],
+       "answer": 3,
+       "why": "Prefer orElse, orElseGet, orElseThrow or ifPresent. Since Java 10, orElseThrow() with no argument is the clear replacement for get().",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Default Methods & Date-Time API",
+     "description": "Interface default/static methods and java.time",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "Why were default methods added to interfaces in Java 8?",
+       "options": [
+        "To make interfaces instantiable",
+        "So interfaces can gain new methods without breaking existing implementations",
+        "To replace abstract classes",
+        "To allow multiple inheritance of state"
+       ],
+       "answer": 1,
+       "why": "This is how Collection.stream(), List.sort() and Iterable.forEach were added without breaking every existing class.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Class Duck implements two interfaces that both define a default method move(). What must Duck do?",
+       "options": [
+        "Declare move() final in both interfaces",
+        "Nothing; the first interface wins",
+        "Override move() and, if needed, call Walker.super.move() or Swimmer.super.move()",
+        "Nothing; the compiler picks the alphabetically first"
+       ],
+       "answer": 2,
+       "why": "This is the diamond problem. The compiler reports an error until the class overrides the method and chooses explicitly.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Are static methods declared in an interface inherited by implementing classes?",
+       "options": [
+        "No; they must be called on the interface name",
+        "Only when the class also overrides them",
+        "Yes, but only if the interface is public",
+        "Yes, like instance methods"
+       ],
+       "answer": 0,
+       "why": "Static interface methods belong to the interface alone: Shape.square(3), not an instance or implementing class.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does LocalDate.of(2026, 1, 31).plusMonths(1) return?",
+       "options": [
+        "It throws DateTimeException",
+        "2026-02-28",
+        "2026-02-31",
+        "2026-03-03"
+       ],
+       "answer": 1,
+       "why": "When the day does not exist in the target month, java.time clamps to the last valid day of that month.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is the difference between Period and Duration?",
+       "options": [
+        "Period is mutable; Duration is immutable",
+        "Period is date-based (years, months, days); Duration is time-based (hours, minutes, seconds)",
+        "They are the same",
+        "Period is for time zones; Duration is for leap years"
+       ],
+       "answer": 1,
+       "why": "Period.between takes two dates. Duration.between takes two times or instants.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "In a DateTimeFormatter pattern, what does mm stand for?",
+       "options": [
+        "Month (minutes is MM)",
+        "Minutes (the month is MM)",
+        "Milliseconds",
+        "Midnight marker"
+       ],
+       "answer": 1,
+       "why": "Lower-case mm is minutes and upper-case MM is the month number. MMM gives the month name.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does ChronoUnit.DAYS.between(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 1)) return?",
+       "options": [
+        "59",
+        "60",
+        "58",
+        "61"
+       ],
+       "answer": 0,
+       "why": "January has 31 days and February 2026 has 28 (2026 is not a leap year), so 31 + 28 = 59.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Why is java.time preferred over Date and SimpleDateFormat?",
+       "options": [
+        "Date cannot store milliseconds",
+        "SimpleDateFormat cannot format dates",
+        "java.time types are immutable and thread-safe, while SimpleDateFormat is not thread-safe",
+        "java.time is faster only on Linux"
+       ],
+       "answer": 2,
+       "why": "DateTimeFormatter and the java.time value types can be shared freely between threads. SimpleDateFormat has mutable internal state.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Modern Java (9 to 21)",
+   "description": "Features added from Java 9 to the Java 21 LTS release",
+   "topics": [
+    {
+     "name": "Java 9 & 10",
+     "description": "List.of, takeWhile, private interface methods, var",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What does List.of(1, 2, 3).add(4) do?",
+       "options": [
+        "Throws IllegalArgumentException",
+        "Adds 4 and returns true",
+        "Returns false",
+        "Throws UnsupportedOperationException"
+       ],
+       "answer": 3,
+       "why": "List.of returns an immutable list.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "Where can var be used?",
+       "options": [
+        "Method parameters",
+        "Fields",
+        "Local variables, including loop variables",
+        "Method return types"
+       ],
+       "answer": 2,
+       "why": "var is local-variable type inference. It does not make Java dynamically typed: the type is still fixed at compile time.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does List.of(1, null) do?",
+       "options": [
+        "Throws NullPointerException",
+        "Throws IllegalArgumentException",
+        "Creates a list with a null element",
+        "Creates a list and ignores the null"
+       ],
+       "answer": 0,
+       "why": "The List.of family rejects nulls. Arrays.asList(1, null) is allowed.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which elements remain after takeWhile(n -> n < 5)?",
+       "options": [
+        "1, 2, 3, 10",
+        "10",
+        "1, 2, 3",
+        "1, 2, 3, 1"
+       ],
+       "answer": 2,
+       "why": "takeWhile stops at the first element that fails the predicate (10), so the trailing 1 is not included. filter would keep both 1s.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(1, 2, 3, 10, 1).takeWhile(n -> n < 5)"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which elements remain after dropWhile(n -> n < 5)?",
+       "options": [
+        "10",
+        "1, 2, 3",
+        "10, 1",
+        "1, 1"
+       ],
+       "answer": 2,
+       "why": "dropWhile discards elements while the predicate holds and then keeps everything that follows, including the trailing 1.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "Stream.of(1, 2, 3, 10, 1).dropWhile(n -> n < 5)"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How does List.copyOf(list) differ from Collections.unmodifiableList(list)?",
+       "options": [
+        "copyOf returns a view; unmodifiableList returns a copy",
+        "They are identical",
+        "copyOf allows null elements",
+        "copyOf makes an immutable snapshot; unmodifiableList is a read-only view that changes when the source changes"
+       ],
+       "answer": 3,
+       "why": "Changing the original list shows through an unmodifiable view but never through a copyOf snapshot.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which Java version added private methods in interfaces?",
+       "options": [
+        "Java 10",
+        "Java 9",
+        "Java 8",
+        "Java 11"
+       ],
+       "answer": 1,
+       "why": "Private interface methods let default methods share code without exposing a helper.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "What does Map.of(\"a\", 1, \"a\", 2) do?",
+       "options": [
+        "Keeps the first value",
+        "Keeps the last value",
+        "Throws NullPointerException",
+        "Throws IllegalArgumentException because of the duplicate key"
+       ],
+       "answer": 3,
+       "why": "Map.of and Set.of reject duplicates at creation time. Their iteration order is also unspecified.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Java 11 & 12",
+     "description": "String methods, Files, teeing, single-file launch",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What does \" \".isBlank() return?",
+       "options": [
+        "true",
+        "It throws NullPointerException",
+        "An empty Optional",
+        "false"
+       ],
+       "answer": 0,
+       "why": "isBlank() is true for empty or whitespace-only strings. isEmpty() is true only for length 0.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "What does \"ab\".repeat(3) return?",
+       "options": [
+        "\"ababab\"",
+        "\"ab ab ab\"",
+        "\"ab3\"",
+        "\"aabbab\""
+       ],
+       "answer": 0,
+       "why": "repeat(n) concatenates the string n times.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How does String.strip() differ from trim()?",
+       "options": [
+        "trim() is Unicode-aware; strip() is not",
+        "strip() removes all Unicode whitespace; trim() removes only characters up to U+0020",
+        "They are identical",
+        "strip() only removes leading whitespace"
+       ],
+       "answer": 1,
+       "why": "Text copied from web pages often contains non-ASCII spaces that trim() leaves behind.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "In which Java version was Collectors.teeing added?",
+       "options": [
+        "Java 11",
+        "Java 8",
+        "Java 17",
+        "Java 12"
+       ],
+       "answer": 3,
+       "why": "teeing runs two collectors in one pass and combines their results.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is Predicate.not(String::isBlank) used for?",
+       "options": [
+        "Converting a Predicate to a Function",
+        "Creating a Predicate that always returns false",
+        "Negating a method reference, for example keeping only non-blank strings in a filter",
+        "Making a predicate asynchronous"
+       ],
+       "answer": 2,
+       "why": "It replaces s -> !s.isBlank() with a cleaner reference: lines.filter(Predicate.not(String::isBlank)).",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which charset do Files.readString(path) and Files.writeString(path, text) use by default?",
+       "options": [
+        "UTF-8",
+        "The platform default charset",
+        "ISO-8859-1",
+        "US-ASCII"
+       ],
+       "answer": 0,
+       "why": "Both methods default to UTF-8 and load the whole file into memory.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "How can you run a single-file Java program in Java 11 without a separate javac step?",
+       "options": [
+        "java -single Hello",
+        "jrun Hello.java",
+        "java Hello.java",
+        "javac -run Hello.java"
+       ],
+       "answer": 2,
+       "why": "The source-file launcher compiles in memory and runs the file.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "What does \"a\\nb\".indent(2) produce?",
+       "options": [
+        "Two blank lines added before the text",
+        "The text unchanged; indent only works on text blocks",
+        "Both lines indented by two spaces, with a trailing newline added",
+        "Only the first line indented by two spaces"
+       ],
+       "answer": 2,
+       "why": "indent(n) adds n leading spaces to every line, normalizes line endings and ends the result with a newline.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Java 14 to 16",
+     "description": "Switch expressions, text blocks, records, pattern instanceof",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What is the accessor for a record component named name?",
+       "options": [
+        "component()",
+        "getName()",
+        "name",
+        "name()"
+       ],
+       "answer": 3,
+       "why": "Record accessors use the component name, not JavaBean-style getters.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "In a switch expression that uses ->, what happens after a case matches?",
+       "options": [
+        "No fall-through; only that case runs",
+        "All remaining cases run",
+        "The switch exits only if break is used",
+        "Execution falls through to the next case"
+       ],
+       "answer": 0,
+       "why": "Arrow cases never fall through and the switch expression produces a value.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is r?",
+       "options": [
+        "0",
+        "5",
+        "10",
+        "15"
+       ],
+       "answer": 3,
+       "why": "case 3 runs the block and yield returns t * 3 = 15.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "int r = switch (3) {\n    case 1, 2 -> 10;\n    case 3 -> { int t = 5; yield t * 3; }\n    default -> 0;\n};"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Can a record extend another class?",
+       "options": [
+        "Yes, any non-final class",
+        "No; records are implicitly final and extend java.lang.Record, but they can implement interfaces",
+        "Only if it is declared sealed",
+        "Yes, but only abstract classes"
+       ],
+       "answer": 1,
+       "why": "A record is a transparent immutable data carrier, so it cannot have a superclass other than Record.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does Stream.toList() (Java 16) return?",
+       "options": [
+        "A LinkedList",
+        "A mutable ArrayList",
+        "A Set",
+        "An unmodifiable list"
+       ],
+       "answer": 3,
+       "why": "Unlike Collectors.toList(), toList() guarantees an unmodifiable list and allows null elements.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "In a text block, what determines how much indentation is stripped?",
+       "options": [
+        "Always four spaces",
+        "Nothing is stripped",
+        "The least-indented content line, including the closing delimiter",
+        "Only the first line"
+       ],
+       "answer": 2,
+       "why": "Moving the closing triple quotes left or right changes the indentation of the whole block.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does if (o instanceof String s && !s.isEmpty()) give you?",
+       "options": [
+        "A compile error; the cast must be explicit",
+        "A variable s of type Object",
+        "A String shared across threads",
+        "A pattern variable s, already cast to String, usable in the rest of the condition and the true branch"
+       ],
+       "answer": 3,
+       "why": "Pattern matching for instanceof (final in Java 16) removes the separate cast.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Why is record Person(List<String> tags) only shallowly immutable?",
+       "options": [
+        "Records cannot hold collections",
+        "Record fields are not final",
+        "equals() compares references",
+        "The reference to the list is final, but the list itself can still be modified"
+       ],
+       "answer": 3,
+       "why": "Make a defensive copy (List.copyOf) in a compact constructor if you need deep immutability.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Java 17: Sealed Classes",
+     "description": "Sealed classes, permits, non-sealed, Java 17 changes",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What does the permits clause of a sealed class do?",
+       "options": [
+        "Lists the only classes allowed to extend or implement it directly",
+        "Grants file access",
+        "Lists the classes it is forbidden to extend",
+        "Makes the class abstract"
+       ],
+       "answer": 0,
+       "why": "A sealed hierarchy is closed: the compiler and readers know every direct subtype.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "Which modifiers can a direct subclass of a sealed class have?",
+       "options": [
+        "default, final or open",
+        "final, sealed or non-sealed",
+        "public, private or protected",
+        "static, final or abstract"
+       ],
+       "answer": 1,
+       "why": "Records and enums are implicitly final, so they satisfy the rule automatically.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "When can the permits clause be omitted?",
+       "options": [
+        "When the subclasses are in another module",
+        "When the class is abstract",
+        "Never",
+        "When the permitted subclasses are in the same source file"
+       ],
+       "answer": 3,
+       "why": "The compiler infers the permitted subclasses declared in the same compilation unit.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What common effect does Java 17's strong encapsulation of JDK internals have on old applications?",
+       "options": [
+        "All reflection is removed",
+        "Applications run faster without changes",
+        "Reflective access to JDK internals fails unless opened with --add-opens",
+        "Serialization stops working"
+       ],
+       "answer": 2,
+       "why": "This is why upgrading from Java 8 or 11 to 17 often exposes libraries that rely on illegal reflective access.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What was the status of pattern matching for switch in Java 17?",
+       "options": [
+        "Removed",
+        "Final feature",
+        "Preview feature (finalized in Java 21)",
+        "Incubator module"
+       ],
+       "answer": 2,
+       "why": "Java 17 finalized sealed classes, but switch patterns stayed in preview until Java 21.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which method returns the permitted subclasses of a sealed type at runtime?",
+       "options": [
+        "Class.permits()",
+        "Class.getPermittedSubclasses()",
+        "Class.getSubclasses()",
+        "Class.getSealedTypes()"
+       ],
+       "answer": 1,
+       "why": "Class.isSealed() tells you whether a type is sealed.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does marking a permitted subclass non-sealed do?",
+       "options": [
+        "Reopens the hierarchy below it, so anyone may extend that subclass",
+        "Makes it final",
+        "Makes it abstract",
+        "Makes it immutable"
+       ],
+       "answer": 0,
+       "why": "Use it deliberately where you want extension beyond the closed set.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "Which list contains only long-term support (LTS) releases?",
+       "options": [
+        "8, 10, 14 and 18",
+        "9, 10, 12 and 13",
+        "8, 11, 17 and 21",
+        "11, 13, 15 and 17"
+       ],
+       "answer": 2,
+       "why": "LTS releases get years of updates. Java 25 is the latest LTS after 21.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Java 21",
+     "description": "Virtual threads, pattern switch, record patterns, sequenced collections",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "What is the status of virtual threads in Java 21?",
+       "options": [
+        "Final (standard) feature",
+        "Incubator",
+        "Preview",
+        "Removed"
+       ],
+       "answer": 0,
+       "why": "Virtual threads were previewed in Java 19 and 20 and finalized in Java 21.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "Which method returns the last element of a List in Java 21?",
+       "options": [
+        "tail()",
+        "peekLast()",
+        "getLast()",
+        "last()"
+       ],
+       "answer": 2,
+       "why": "List now implements SequencedCollection, which adds getFirst(), getLast(), reversed() and more.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Should you pool virtual threads in a fixed-size thread pool?",
+       "options": [
+        "No; create one per task because they are cheap",
+        "Yes, otherwise they leak",
+        "Only on Windows",
+        "Yes, always cap them at the number of CPU cores"
+       ],
+       "answer": 0,
+       "why": "Use Executors.newVirtualThreadPerTaskExecutor() and limit concurrency with a Semaphore if needed.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Virtual threads help most with:",
+       "options": [
+        "Reducing the heap usage of a single task",
+        "Many concurrent tasks that spend their time blocked on I/O",
+        "CPU-bound number crunching",
+        "Replacing garbage collection"
+       ],
+       "answer": 1,
+       "why": "A blocked virtual thread unmounts from its carrier thread, letting the carrier run other work.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What is this syntax called?",
+       "options": [
+        "A lambda expression",
+        "A record pattern",
+        "A text block",
+        "A sealed permit"
+       ],
+       "answer": 1,
+       "why": "Record patterns deconstruct a record in switch or instanceof and were finalized in Java 21.",
+       "tags": [
+        "Java Interview Prep"
+       ],
+       "code": "case Circle(double r) -> Math.PI * r * r;"
+      },
+      {
+       "d": "MEDIUM",
+       "q": "In a pattern switch, where must case Integer i when i > 10 appear relative to case Integer i?",
+       "options": [
+        "It does not matter",
+        "After it",
+        "Before it; otherwise the guarded case is dominated and does not compile",
+        "In a separate switch"
+       ],
+       "answer": 2,
+       "why": "The compiler rejects a case that an earlier, more general case would always catch.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "In Java 21, what is thread pinning?",
+       "options": [
+        "A virtual thread blocked inside a synchronized block stays attached to its carrier thread, reducing scalability",
+        "Setting thread priority to maximum",
+        "Assigning a thread to a CPU core",
+        "Pausing the JVM for garbage collection"
+       ],
+       "answer": 0,
+       "why": "Prefer ReentrantLock over synchronized around blocking calls when using virtual threads on Java 21.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "What was the status of string templates in Java 21?",
+       "options": [
+        "Final feature",
+        "Removed in 21",
+        "Preview feature",
+        "Incubator module"
+       ],
+       "answer": 2,
+       "why": "Do not rely on preview features in production code.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Concurrency (Java 8+)",
+   "description": "CompletableFuture and parallel streams",
+   "topics": [
+    {
+     "name": "CompletableFuture & Parallel Streams",
+     "description": "Async pipelines and parallel streams",
+     "questions": [
+      {
+       "d": "EASY",
+       "q": "Which CompletableFuture method is the equivalent of Stream.map?",
+       "options": [
+        "allOf",
+        "thenAccept",
+        "thenCompose",
+        "thenApply"
+       ],
+       "answer": 3,
+       "why": "thenApply transforms the result. thenCompose is the flatMap equivalent.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "EASY",
+       "q": "How do join() and get() differ?",
+       "options": [
+        "get() is only for completed futures",
+        "join() throws the unchecked CompletionException; get() throws the checked ExecutionException and InterruptedException",
+        "They are identical",
+        "join() waits; get() does not"
+       ],
+       "answer": 1,
+       "why": "join() is convenient inside lambdas because it needs no try/catch.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "When should you use thenCompose instead of thenApply?",
+       "options": [
+        "When running on a custom executor",
+        "When the next step returns void",
+        "When the next step itself returns a CompletableFuture",
+        "When the first future failed"
+       ],
+       "answer": 2,
+       "why": "thenApply would give CompletableFuture<CompletableFuture<T>>. thenCompose flattens it.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "Which pool does supplyAsync(supplier) use by default?",
+       "options": [
+        "ForkJoinPool.commonPool()",
+        "A fixed pool of 10 threads",
+        "A new thread per call",
+        "The main thread"
+       ],
+       "answer": 0,
+       "why": "Pass your own Executor for blocking or I/O-heavy tasks.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does CompletableFuture.allOf(f1, f2) return?",
+       "options": [
+        "CompletableFuture<List<T>> of all results",
+        "The first completed result",
+        "An array of results",
+        "CompletableFuture<Void>; you read the values from f1 and f2 yourself"
+       ],
+       "answer": 3,
+       "why": "Call join() on allOf to wait, then join() each individual future for its value.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "An exception is thrown inside supplyAsync. What does handle((v, ex) -> ...) receive as ex?",
+       "options": [
+        "null",
+        "The original exception unwrapped",
+        "An ExecutionException",
+        "A CompletionException wrapping the original exception"
+       ],
+       "answer": 3,
+       "why": "Use ex.getCause() to reach the original exception. This was verified by running the code on a JDK.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "MEDIUM",
+       "q": "What does parallelStream().forEach(...) guarantee about order?",
+       "options": [
+        "Elements arrive in reverse order",
+        "Encounter order is always preserved",
+        "No order guarantee; use forEachOrdered if order matters",
+        "Elements arrive sorted"
+       ],
+       "answer": 2,
+       "why": "collect(toList()) preserves encounter order, but forEach does not on a parallel stream.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      },
+      {
+       "d": "HARD",
+       "q": "When is parallelStream() a bad choice?",
+       "options": [
+        "Summing a big range of numbers",
+        "Small data, blocking I/O inside the lambda, or shared mutable state",
+        "Large CPU-bound stateless work",
+        "Splittable sources such as arrays"
+       ],
+       "answer": 1,
+       "why": "Parallel streams use the common pool, so blocking tasks can starve unrelated work.",
+       "tags": [
+        "Java Interview Prep"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "exams": [
+  {
+   "title": "Java 8 Mock Test",
+   "duration_minutes": 30,
+   "navigation_mode": "FREE",
+   "negative_marking": 0,
+   "sections": [
+    {
+     "name": "Lambda & Functional Interfaces",
+     "topics": [
+      "Lambda & Functional Interfaces"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Stream Basics",
+     "topics": [
+      "Stream Basics"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Collectors",
+     "topics": [
+      "Collectors"
+     ],
+     "count": 3
+    },
+    {
+     "name": "flatMap & Laziness",
+     "topics": [
+      "flatMap & Laziness"
+     ],
+     "count": 3
+    },
+    {
+     "name": "String & Character Streams",
+     "topics": [
+      "String & Character Streams"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Optional & Method References",
+     "topics": [
+      "Optional & Method References"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Default Methods & Date-Time API",
+     "topics": [
+      "Default Methods & Date-Time API"
+     ],
+     "count": 3
+    }
+   ]
+  },
+  {
+   "title": "Modern Java (9 to 21) Mock Test",
+   "duration_minutes": 25,
+   "navigation_mode": "FREE",
+   "negative_marking": 0,
+   "sections": [
+    {
+     "name": "Java 9 & 10",
+     "topics": [
+      "Java 9 & 10"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Java 11 & 12",
+     "topics": [
+      "Java 11 & 12"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Java 14 to 16",
+     "topics": [
+      "Java 14 to 16"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Java 17: Sealed Classes",
+     "topics": [
+      "Java 17: Sealed Classes"
+     ],
+     "count": 3
+    },
+    {
+     "name": "Java 21",
+     "topics": [
+      "Java 21"
+     ],
+     "count": 3
+    }
+   ]
+  },
+  {
+   "title": "Java Full Mock Test",
+   "duration_minutes": 25,
+   "navigation_mode": "FREE",
+   "negative_marking": 0,
+   "sections": [
+    {
+     "name": "Java 8",
+     "topics": [
+      "Lambda & Functional Interfaces",
+      "Stream Basics",
+      "Collectors",
+      "flatMap & Laziness",
+      "String & Character Streams",
+      "Optional & Method References",
+      "Default Methods & Date-Time API"
+     ],
+     "count": 8
+    },
+    {
+     "name": "Modern Java",
+     "topics": [
+      "Java 9 & 10",
+      "Java 11 & 12",
+      "Java 14 to 16",
+      "Java 17: Sealed Classes",
+      "Java 21"
+     ],
+     "count": 6
+    },
+    {
+     "name": "Concurrency",
+     "topics": [
+      "CompletableFuture & Parallel Streams"
+     ],
+     "count": 2
+    }
+   ]
+  }
+ ]
+}
